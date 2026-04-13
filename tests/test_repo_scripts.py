@@ -11,6 +11,7 @@ def test_build_skill_creates_artifact_without_scripts(tmp_path):
     assert (artifact / "tools" / "memory.py").exists()
     assert (artifact / "tools" / "context_router.py").exists()
     assert (artifact / "assets" / "templates" / "AGENT.md").exists()
+    assert (artifact / "assets" / "templates" / "interview-planner-system.md").exists()
     assert (artifact / "assets" / "templates" / "persona" / "narrative.md").exists()
     assert not (artifact / "assets" / "templates" / "self-model").exists()
     assert not (artifact / "scripts").exists()
@@ -32,6 +33,7 @@ def test_build_skill_ignores_python_cache_files(tmp_path, monkeypatch):
     (tmp_path / "tools" / "__init__.py").write_text("", encoding="utf-8")
     (tmp_path / "tools" / "__pycache__" / "memory.cpython-314.pyc").write_text("compiled", encoding="utf-8")
     (tmp_path / "templates" / "AGENT.md").write_text("agent\n", encoding="utf-8")
+    (tmp_path / "templates" / "interview-planner-system.md").write_text("planner\n", encoding="utf-8")
     (tmp_path / "templates" / "persona" / "narrative.md").write_text("persona\n", encoding="utf-8")
 
     monkeypatch.setitem(build_skill.__globals__, "repo_root", lambda: tmp_path)
@@ -65,6 +67,7 @@ def test_publish_skill_writes_repo_publish_directory(tmp_path, monkeypatch):
     (tmp_path / "tools" / "context_router.py").write_text("", encoding="utf-8")
     (tmp_path / "tools" / "__init__.py").write_text("", encoding="utf-8")
     (tmp_path / "templates" / "AGENT.md").write_text("agent\n", encoding="utf-8")
+    (tmp_path / "templates" / "interview-planner-system.md").write_text("planner\n", encoding="utf-8")
     (tmp_path / "templates" / "persona" / "narrative.md").write_text("persona\n", encoding="utf-8")
 
     monkeypatch.setitem(publish_skill.__globals__, "repo_root", lambda: tmp_path)
@@ -78,6 +81,7 @@ def test_publish_skill_writes_repo_publish_directory(tmp_path, monkeypatch):
     assert (artifact / "tools" / "role_ops.py").exists()
     assert (artifact / "tools" / "context_router.py").exists()
     assert (artifact / "assets" / "templates" / "AGENT.md").exists()
+    assert (artifact / "assets" / "templates" / "interview-planner-system.md").exists()
     assert (artifact / "assets" / "templates" / "persona" / "narrative.md").exists()
 
 
@@ -95,6 +99,7 @@ def test_build_script_runs_publish_when_executed_directly(tmp_path, monkeypatch)
     (tmp_path / "tools" / "context_router.py").write_text("", encoding="utf-8")
     (tmp_path / "tools" / "__init__.py").write_text("", encoding="utf-8")
     (tmp_path / "templates" / "AGENT.md").write_text("agent\n", encoding="utf-8")
+    (tmp_path / "templates" / "interview-planner-system.md").write_text("planner\n", encoding="utf-8")
     (tmp_path / "templates" / "persona" / "narrative.md").write_text("persona\n", encoding="utf-8")
 
     monkeypatch.setitem(build_skill.__globals__, "repo_root", lambda: tmp_path)

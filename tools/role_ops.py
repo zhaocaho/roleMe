@@ -130,6 +130,7 @@ class RoleInterview:
 @dataclass(frozen=True)
 class InterviewSession:
     role_name: str
+    user_language: str
     current_stage: str
     current_prompt: str
     answers: dict[str, str]
@@ -154,6 +155,15 @@ class InterviewTurnPlan:
 
 
 @dataclass(frozen=True)
+class InterviewPlannerDirective:
+    target_slot: str
+    question: str
+    rationale: str
+    answer_mode: str = "append"
+    ready_to_finalize: bool = False
+
+
+@dataclass(frozen=True)
 class DoctorReport:
     missing_files: list[str]
     warnings: list[str]
@@ -171,35 +181,32 @@ INTERVIEW_STAGE_ORDER = [
 ]
 
 INTERVIEW_STAGE_PROMPTS = {
-    "narrative": (
-        "Please answer in first-person. Who are you, how did you get here, and what stage are you in now?"
-    ),
-    "communication_style": (
-        "How do you prefer to communicate and collaborate: default language, answer style, pacing, and tone?"
-    ),
-    "decision_rules": (
-        "What decision rules do you use in priority order? Explain what you optimize for first, second, and third."
-    ),
-    "disclosure_layers": (
-        "How should your context be disclosed progressively? What belongs in resident context versus on-demand context?"
-    ),
-    "user_memory": (
-        "List stable preferences or long-term agreements for USER memory. One item per line, optionally starting with `- `."
-    ),
-    "memory_summary": (
-        "List high-value long-term conclusions for MEMORY summary. One item per line."
-    ),
-    "brain_topics": (
-        "Describe brain topics with `title:`, `slug:`, `summary:`, and `content:`. Separate multiple topics with `---`."
-    ),
-    "projects": (
-        "Describe project context with `name:`, `context:`, `overlay:`, and `memory:`. Separate multiple projects with `---`, and split multiple memory items with `|`."
-    ),
+    "zh": {
+        "narrative": "请用第一人称介绍你自己：你是谁、怎么走到今天、现在处于什么阶段？",
+        "communication_style": "你希望我默认怎么和你沟通协作？请说明语言、回答风格、节奏和语气。",
+        "decision_rules": "当出现取舍时，你通常按什么优先级做决定？请说明第一、第二、第三优先级。",
+        "disclosure_layers": "你的上下文应该怎样渐进式披露？哪些内容应常驻，哪些内容应按需展开？",
+        "user_memory": "请列出应进入 USER memory 的稳定偏好或长期约定，每行一条，可用 `- ` 开头。",
+        "memory_summary": "请列出应进入 MEMORY summary 的高价值长期结论，每行一条。",
+        "brain_topics": "请描述 brain 主题，使用 `title:`、`slug:`、`summary:`、`content:`，多个主题之间用 `---` 分隔。",
+        "projects": "请描述项目上下文，使用 `name:`、`context:`、`overlay:`、`memory:`，多个项目之间用 `---` 分隔，`memory:` 多条可用 `|` 分隔。",
+    },
+    "en": {
+        "narrative": "Please answer in first-person. Who are you, how did you get here, and what stage are you in now?",
+        "communication_style": "How do you prefer to communicate and collaborate: default language, answer style, pacing, and tone?",
+        "decision_rules": "What decision rules do you use in priority order? Explain what you optimize for first, second, and third.",
+        "disclosure_layers": "How should your context be disclosed progressively? What belongs in resident context versus on-demand context?",
+        "user_memory": "List stable preferences or long-term agreements for USER memory. One item per line, optionally starting with `- `.",
+        "memory_summary": "List high-value long-term conclusions for MEMORY summary. One item per line.",
+        "brain_topics": "Describe brain topics with `title:`, `slug:`, `summary:`, and `content:`. Separate multiple topics with `---`.",
+        "projects": "Describe project context with `name:`, `context:`, `overlay:`, and `memory:`. Separate multiple projects with `---`, and split multiple memory items with `|`.",
+    },
 }
 
-INTERVIEW_REVIEW_PROMPT = (
-    "Interview draft is ready. Please confirm whether this preview should be materialized into the role bundle."
-)
+INTERVIEW_REVIEW_PROMPTS = {
+    "zh": "访谈草稿已经准备好了。请确认是否将这份预览正式写入角色包。",
+    "en": "Interview draft is ready. Please confirm whether this preview should be materialized into the role bundle.",
+}
 
 
 def repo_root() -> Path:
@@ -223,6 +230,28 @@ def _render(source: Path, destination: Path, role_name: str) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     content = source.read_text(encoding="utf-8").replace("<role-name>", role_name)
     destination.write_text(content, encoding="utf-8")
+
+
+def _render_template_text(source: Path, replacements: dict[str, str]) -> str:
+    content = source.read_text(encoding="utf-8")
+    for key, value in replacements.items():
+        content = content.replace(key, value)
+    return content
+
+
+def _language_key(user_language: str) -> str:
+    normalized = user_language.strip().lower()
+    if "中" in user_language or normalized.startswith("zh") or "chinese" in normalized:
+        return "zh"
+    return "en"
+
+
+def _localized_stage_prompt(slot: str, user_language: str) -> str:
+    return INTERVIEW_STAGE_PROMPTS[_language_key(user_language)][slot]
+
+
+def _localized_review_prompt(user_language: str) -> str:
+    return INTERVIEW_REVIEW_PROMPTS[_language_key(user_language)]
 
 
 def _replace_marker_entries(path: Path, entries: list[str]) -> None:
@@ -464,7 +493,16 @@ def assess_interview_gaps(answers: dict[str, str]) -> list[InterviewGap]:
     ]
 
 
-def _build_missing_question(slot: str, answers: dict[str, str]) -> str:
+def _build_missing_question(slot: str, answers: dict[str, str], user_language: str) -> str:
+    if _language_key(user_language) == "zh":
+        if slot == "communication_style" and answers.get("narrative"):
+            return "我已经大致理解你是谁了。接下来请说说你希望我默认怎么和你沟通：语言、回答方式、结构、节奏和协作方式分别是什么？"
+        if slot == "decision_rules" and answers.get("narrative"):
+            return "基于你刚才描述的角色，当出现取舍时，你通常按什么优先级做决定？"
+        if slot == "disclosure_layers":
+            return "你的哪些信息应该始终常驻，哪些信息应该只在需要时再展开？"
+        return _localized_stage_prompt(slot, user_language)
+
     if slot == "communication_style" and answers.get("narrative"):
         return (
             "I have a grounded sense of who you are. How should our communication work by default: language, structure, pacing, and collaboration style?"
@@ -477,10 +515,17 @@ def _build_missing_question(slot: str, answers: dict[str, str]) -> str:
         return (
             "Which parts of your role should stay resident all the time, and which parts should only be pulled in on demand?"
         )
-    return INTERVIEW_STAGE_PROMPTS[slot]
+    return _localized_stage_prompt(slot, user_language)
 
 
-def _build_partial_follow_up(slot: str, answer: str, notes: str) -> str:
+def _build_partial_follow_up(slot: str, answer: str, notes: str, user_language: str) -> str:
+    if _language_key(user_language) == "zh":
+        if slot == "narrative":
+            return "我已经知道一点你的身份了，但这还不够支撑角色。请继续用第一人称补充你是怎么走到今天的、哪些经历塑造了你、你现在处于什么阶段。"
+        if slot in {"user_memory", "memory_summary"}:
+            return f"{notes} 请再补充几条稳定信息，每行一条。"
+        return f"{notes} 请继续补充更具体的 `{slot}` 信息。"
+
     if slot == "narrative":
         return (
             "I already know a little about your identity, but not enough to ground the role yet. "
@@ -491,15 +536,20 @@ def _build_partial_follow_up(slot: str, answer: str, notes: str) -> str:
     return f"{notes} Please add a more specific follow-up for `{slot}`."
 
 
-def _plan_next_turn_from_answers(answers: dict[str, str]) -> InterviewTurnPlan:
+def _plan_next_turn_from_answers(answers: dict[str, str], user_language: str) -> InterviewTurnPlan:
     gap_summary = assess_interview_gaps(answers)
     for gap in gap_summary:
         if gap.status == "complete":
             continue
         if gap.status == "partial":
-            question = _build_partial_follow_up(gap.slot, answers.get(gap.slot, ""), gap.notes)
+            question = _build_partial_follow_up(
+                gap.slot,
+                answers.get(gap.slot, ""),
+                gap.notes,
+                user_language,
+            )
         else:
-            question = _build_missing_question(gap.slot, answers)
+            question = _build_missing_question(gap.slot, answers, user_language)
         return InterviewTurnPlan(
             target_slot=gap.slot,
             question=question,
@@ -510,19 +560,73 @@ def _plan_next_turn_from_answers(answers: dict[str, str]) -> InterviewTurnPlan:
 
     return InterviewTurnPlan(
         target_slot="review",
-        question=INTERVIEW_REVIEW_PROMPT,
-        rationale="All required slots are covered well enough to materialize the role bundle.",
+        question=_localized_review_prompt(user_language),
+        rationale=(
+            "所有必需槽位都已经足够扎实，可以进入 review。"
+            if _language_key(user_language) == "zh"
+            else "All required slots are covered well enough to materialize the role bundle."
+        ),
         gap_summary=gap_summary,
         ready_to_finalize=True,
     )
 
 
 def build_interview_planner_prompt(session: InterviewSession) -> str:
+    if _language_key(session.user_language) == "zh":
+        lines = [
+            "# 动态访谈规划器",
+            "",
+            f"角色: {session.role_name}",
+            f"当前槽位: {session.current_stage}",
+            "",
+            "工作原则:",
+            "- 这不是固定问卷。",
+            "- 这些槽位只是归档目标，不是你必须按顺序执行的脚本。",
+            "- 当前只问一个信息增益最高的问题。",
+            "- 同一个模型在不同情景里问出不同问题是正常的。",
+            "- 保持对话自然，同时确保结果能稳定落成角色包。",
+            "",
+            "已知信息:",
+        ]
+        if session.answers:
+            for slot in INTERVIEW_STAGE_ORDER:
+                value = session.answers.get(slot, "").strip()
+                if value:
+                    lines.append(f"- {slot}: {value}")
+        else:
+            lines.append("- <暂无>")
+
+        lines.extend(["", "缺口评估:"])
+        for gap in assess_interview_gaps(session.answers):
+            lines.append(
+                f"- {gap.slot}: status={gap.status}, confidence={gap.confidence:.2f}, notes={gap.notes}"
+            )
+
+        lines.extend(
+            [
+                "",
+                "请返回 JSON，包含:",
+                '- `target_slot`: narrative, communication_style, decision_rules, disclosure_layers, user_memory, memory_summary, brain_topics, projects, review 之一',
+                '- `question`: 下一句真正要问的问题',
+                '- `rationale`: 为什么这句当前信息增益最高',
+                '- `answer_mode`: `append` 表示补充已有内容，`replace` 表示纠正并覆盖旧内容',
+                '- `ready_to_finalize`: 只有在可以进入 review 时才设为 true',
+            ]
+        )
+        return "\n".join(lines) + "\n"
+
     lines = [
         "# Dynamic Interview Planner",
         "",
         f"Role: {session.role_name}",
         f"Current slot: {session.current_stage}",
+        "",
+        "Operating principles:",
+        "- This is not a fixed questionnaire.",
+        "- The slots are storage destinations, not a script you must follow in order.",
+        "- Ask exactly one next question with the highest information gain for the current context.",
+        "- The same model may ask different questions in different situations and still be correct.",
+        "- Keep the conversation natural, but converge toward a role bundle that can be materialized reliably.",
         "",
         "Known answers:",
     ]
@@ -547,10 +651,48 @@ def build_interview_planner_prompt(session: InterviewSession) -> str:
             '- `target_slot`: one of narrative, communication_style, decision_rules, disclosure_layers, user_memory, memory_summary, brain_topics, projects, review',
             '- `question`: ask exactly one next question',
             '- `rationale`: why this question has the highest information gain now',
+            '- `answer_mode`: `append` for adding onto existing slot content, `replace` for corrections that should overwrite prior content',
             '- `ready_to_finalize`: true only if the interview is grounded enough to review',
         ]
     )
     return "\n".join(lines) + "\n"
+
+
+def parse_interview_planner_response(raw: str | dict[str, object]) -> InterviewPlannerDirective:
+    payload = json.loads(raw) if isinstance(raw, str) else dict(raw)
+    target_slot = str(payload.get("target_slot", "")).strip()
+    question = str(payload.get("question", "")).strip()
+    rationale = str(payload.get("rationale", "")).strip()
+    answer_mode = str(payload.get("answer_mode", "append")).strip().lower() or "append"
+    ready_to_finalize = bool(payload.get("ready_to_finalize", False))
+
+    valid_slots = set(INTERVIEW_STAGE_ORDER) | {"review"}
+    if target_slot not in valid_slots:
+        raise ValueError(f"Unsupported planner target_slot: {target_slot}")
+    if not question:
+        raise ValueError("Planner response must include a question.")
+    if answer_mode not in {"append", "replace"}:
+        raise ValueError(f"Unsupported planner answer_mode: {answer_mode}")
+
+    return InterviewPlannerDirective(
+        target_slot=target_slot,
+        question=question,
+        rationale=rationale,
+        answer_mode=answer_mode,
+        ready_to_finalize=ready_to_finalize,
+    )
+
+
+def render_interview_planner_system_prompt(session: InterviewSession) -> str:
+    return _render_template_text(
+        templates_dir() / "interview-planner-system.md",
+        {
+            "<role-name>": session.role_name,
+            "<user-language>": session.user_language,
+            "<current-slot>": session.current_stage,
+            "<planner-guide>": build_interview_planner_prompt(session).strip(),
+        },
+    )
 
 
 def initialize_role(role_name: str, skill_version: str) -> Path:
@@ -580,10 +722,11 @@ def initialize_role(role_name: str, skill_version: str) -> Path:
     return destination
 
 
-def begin_role_interview(role_name: str) -> InterviewSession:
-    first_plan = _plan_next_turn_from_answers({})
+def begin_role_interview(role_name: str, user_language: str = "中文") -> InterviewSession:
+    first_plan = _plan_next_turn_from_answers({}, user_language)
     return InterviewSession(
         role_name=role_name,
+        user_language=user_language,
         current_stage=first_plan.target_slot,
         current_prompt=first_plan.question,
         answers={},
@@ -591,22 +734,35 @@ def begin_role_interview(role_name: str) -> InterviewSession:
     )
 
 
-def submit_interview_answer(session: InterviewSession, answer: str) -> InterviewSession:
+def submit_interview_answer(
+    session: InterviewSession,
+    answer: str,
+    slot: str | None = None,
+    mode: str = "append",
+) -> InterviewSession:
     if session.current_stage == "review":
         raise ValueError("Interview is already ready for confirmation.")
 
     answers = dict(session.answers)
+    target_slot = slot or session.current_stage
+    if target_slot not in INTERVIEW_STAGE_ORDER:
+        raise ValueError(f"Unsupported interview slot: {target_slot}")
+    if mode not in {"append", "replace"}:
+        raise ValueError(f"Unsupported answer mode: {mode}")
     incoming = answer.strip()
-    existing = answers.get(session.current_stage, "").strip()
-    if existing and incoming and incoming not in existing:
-        answers[session.current_stage] = f"{existing}\n\n{incoming}"
+    existing = answers.get(target_slot, "").strip()
+    if mode == "replace":
+        answers[target_slot] = incoming or existing
+    elif existing and incoming and incoming not in existing:
+        answers[target_slot] = f"{existing}\n\n{incoming}"
     else:
-        answers[session.current_stage] = incoming or existing
+        answers[target_slot] = incoming or existing
 
-    next_plan = _plan_next_turn_from_answers(answers)
+    next_plan = _plan_next_turn_from_answers(answers, session.user_language)
     if next_plan.ready_to_finalize:
         return InterviewSession(
             role_name=session.role_name,
+            user_language=session.user_language,
             current_stage="review",
             current_prompt=next_plan.question,
             answers=answers,
@@ -615,6 +771,7 @@ def submit_interview_answer(session: InterviewSession, answer: str) -> Interview
 
     return InterviewSession(
         role_name=session.role_name,
+        user_language=session.user_language,
         current_stage=next_plan.target_slot,
         current_prompt=next_plan.question,
         answers=answers,

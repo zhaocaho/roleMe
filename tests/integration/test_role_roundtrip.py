@@ -266,3 +266,57 @@ def test_role_roundtrip_interview_session_materializes_and_supports_query_contex
     assert "brain/topics/ai-product.md" in bundle.discovered_paths
     assert "projects/roleme/context.md" in bundle.discovered_paths
     assert "AI Product" in bundle.context_snapshot
+
+
+def test_role_roundtrip_interview_correction_with_replace_mode_materializes_latest_value(
+    tmp_role_home,
+):
+    session = begin_role_interview("self")
+    session = submit_interview_answer(
+        session,
+        "I am an AI product strategist who moved from delivery work into role engineering, and I now focus on long-term human-AI collaboration systems.",
+    )
+    session = submit_interview_answer(
+        session,
+        "Default to Chinese, lead with the conclusion, and keep collaboration direct and structured.",
+    )
+    session = submit_interview_answer(
+        session,
+        "Default to Chinese and keep responses concise and direct.",
+        slot="communication_style",
+        mode="replace",
+    )
+
+    answers = {
+        "decision_rules": "Prioritize execution, then consistency, then maintainability.",
+        "disclosure_layers": "Start from resident context and expand only when needed.",
+        "user_memory": "- Default language is Chinese\n- Keep responses concise",
+        "memory_summary": "- Long-term focus on AI product strategy\n- Active roleMe refactor",
+        "brain_topics": "\n".join(
+            [
+                "title: AI Product",
+                "slug: ai-product",
+                "summary: Focus on positioning and execution.",
+                "content: # AI Product",
+                "",
+                "Focus on positioning and execution.",
+            ]
+        ),
+        "projects": "\n".join(
+            [
+                "name: roleme",
+                "context: This project is refactoring roleMe into a user role context system.",
+                "overlay: Answer with both role engineering and AI product perspectives.",
+                "memory: Current priority is interview orchestration | Progressive retrieval remains important.",
+            ]
+        ),
+    }
+
+    while session.current_stage != "review":
+        session = submit_interview_answer(session, answers[session.current_stage])
+
+    role_path = finalize_role_interview(session, skill_version="0.1.0")
+
+    assert "keep responses concise and direct" in (
+        role_path / "persona" / "communication-style.md"
+    ).read_text(encoding="utf-8")

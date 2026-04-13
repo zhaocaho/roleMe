@@ -104,6 +104,8 @@
 
 大模型应根据这些信息缺口来决定“下一问最值得问什么”。不同模型可以问出不同问题，只要最终都能落到同一套角色包结构里。
 
+这里的重点不是“换一个模型就问不一样的问题”，而是“同一个模型在不同情景里，也应该能根据上下文问出不同的问题”。系统约束的是归纳方向和落盘结构，不是追问路径本身。
+
 ### 稳定的落盘结构
 
 不管访谈过程怎么问，最终都要落到这些位置：
@@ -122,7 +124,7 @@
 当前实现提供了动态访谈的基础接口：
 
 - `begin_role_interview(role_name)`
-- `submit_interview_answer(session, answer)`
+- `submit_interview_answer(session, answer, slot=None)`
 - `build_interview_planner_prompt(session)`
 - `finalize_role_interview(session, skill_version)`
 
@@ -131,6 +133,29 @@
 - 已知答案
 - 当前信息缺口评估
 - 下一问应返回的结构化字段
+
+同时它还会明确约束：
+
+- 这不是固定问卷
+- 槽位只是归档目标，不是提问顺序脚本
+- 当前应只问一个信息增益最高的问题
+
+### 结构化返回契约
+
+为了让自然对话后的归档更稳定，planner 的结构化输出现在建议至少包含：
+
+- `target_slot`
+  这轮答案主要归到哪个槽位
+- `question`
+  下一句真正要问用户的问题
+- `rationale`
+  为什么这句在当前上下文里最值得问
+- `answer_mode`
+  `append` 表示补充已有内容，`replace` 表示这轮是在纠正旧内容
+- `ready_to_finalize`
+  是否已经足够进入 review
+
+这层契约不是为了限制模型怎么问，而是为了在模型问完以后，系统能更稳定地接住结果。
 
 这样模型可以“先思考，再发问”，而不是只能执行固定问卷。
 

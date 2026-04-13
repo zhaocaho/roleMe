@@ -12,6 +12,8 @@ from tools.role_ops import (
     list_roles,
     load_query_context_bundle,
     load_role_bundle,
+    parse_interview_planner_response,
+    render_interview_planner_system_prompt,
     submit_interview_answer,
 )
 
@@ -146,13 +148,21 @@ def test_initialize_role_from_interview_materializes_persona_memory_brain_and_pr
     ).read_text(encoding="utf-8")
 
 
-def test_begin_role_interview_starts_with_narrative_prompt(tmp_role_home):
+def test_begin_role_interview_starts_with_chinese_narrative_prompt(tmp_role_home):
     session = begin_role_interview("self")
 
     assert session.role_name == "self"
+    assert session.user_language == "中文"
     assert session.current_stage == "narrative"
     assert session.answers == {}
     assert session.preview == ""
+    assert "第一人称" in session.current_prompt
+
+
+def test_begin_role_interview_can_start_in_english(tmp_role_home):
+    session = begin_role_interview("self", user_language="English")
+
+    assert session.user_language == "English"
     assert "first-person" in session.current_prompt.lower()
 
 
@@ -162,8 +172,8 @@ def test_submit_interview_answer_reasks_same_slot_when_answer_is_too_shallow(tmp
     next_session = submit_interview_answer(session, "I am a PM.")
 
     assert next_session.current_stage == "narrative"
-    assert "already know" in next_session.current_prompt.lower()
-    assert "how you got here" in next_session.current_prompt.lower()
+    assert "还不够" in next_session.current_prompt
+    assert "怎么走到今天" in next_session.current_prompt
 
 
 def test_submit_interview_answer_moves_to_next_gap_when_answer_is_rich_enough(tmp_role_home):
@@ -175,8 +185,20 @@ def test_submit_interview_answer_moves_to_next_gap_when_answer_is_rich_enough(tm
     )
 
     assert next_session.current_stage == "communication_style"
+    assert "沟通" in next_session.current_prompt
+    assert "回答" in next_session.current_prompt
+
+
+def test_submit_interview_answer_keeps_english_prompt_for_english_user(tmp_role_home):
+    session = begin_role_interview("self", user_language="English")
+
+    next_session = submit_interview_answer(
+        session,
+        "I am an AI product strategist who moved from delivery work into role engineering, and I now focus on long-term human-AI collaboration systems.",
+    )
+
+    assert next_session.current_stage == "communication_style"
     assert "communication" in next_session.current_prompt.lower()
-    assert "answers" not in next_session.current_prompt.lower()
 
 
 def test_submit_interview_answer_advances_to_review_with_preview(tmp_role_home):
@@ -213,7 +235,7 @@ def test_submit_interview_answer_advances_to_review_with_preview(tmp_role_home):
         session = submit_interview_answer(session, answers[session.current_stage])
 
     assert session.current_stage == "review"
-    assert "confirm" in session.current_prompt.lower()
+    assert "确认" in session.current_prompt
     assert "AI Product" in session.preview
     assert "roleme" in session.preview
 
@@ -241,8 +263,94 @@ def test_build_interview_planner_prompt_includes_known_answers_and_gap_summary(t
 
     prompt = build_interview_planner_prompt(session)
 
-    assert "Known answers" in prompt
-    assert "Gap assessment" in prompt
+    assert "已知信息" in prompt
+    assert "缺口评估" in prompt
+    assert "communication_style" in prompt
+    assert "AI product strategist" in prompt
+
+
+def test_build_interview_planner_prompt_frames_slots_as_constraints_not_script(tmp_role_home):
+    prompt = build_interview_planner_prompt(begin_role_interview("self"))
+
+    assert "不是固定问卷" in prompt
+    assert "归档目标" in prompt
+    assert "信息增益最高" in prompt
+    assert "answer_mode" in prompt
+
+
+def test_submit_interview_answer_can_store_out_of_order_slot_without_breaking_flow(tmp_role_home):
+    session = begin_role_interview("self")
+    session = submit_interview_answer(
+        session,
+        "I am an AI product strategist who moved from delivery work into role engineering, and I now focus on building long-term human-AI collaboration systems.",
+    )
+
+    next_session = submit_interview_answer(
+        session,
+        "Prioritize execution first, consistency second, and long-term maintainability third.",
+        slot="decision_rules",
+    )
+
+    assert next_session.answers["decision_rules"].startswith("Prioritize execution first")
+    assert next_session.current_stage == "communication_style"
+    assert "沟通" in next_session.current_prompt
+
+
+def test_submit_interview_answer_supports_replace_mode_for_corrections(tmp_role_home):
+    session = begin_role_interview("self")
+    session = submit_interview_answer(
+        session,
+        "I am an AI product strategist who moved from delivery work into role engineering, and I now focus on building long-term human-AI collaboration systems.",
+    )
+
+    session = submit_interview_answer(
+        session,
+        "Default to Chinese, lead with the conclusion, and keep collaboration direct and structured.",
+    )
+    corrected = submit_interview_answer(
+        session,
+        "Default to Chinese and keep responses concise and direct.",
+        slot="communication_style",
+        mode="replace",
+    )
+
+    assert corrected.answers["communication_style"] == (
+        "Default to Chinese and keep responses concise and direct."
+    )
+
+
+def test_parse_interview_planner_response_normalizes_structured_output():
+    directive = parse_interview_planner_response(
+        """
+        {
+          "target_slot": "decision_rules",
+          "question": "When tradeoffs appear, what do you optimize for first?",
+          "rationale": "Decision heuristics are still missing.",
+          "answer_mode": "replace",
+          "ready_to_finalize": false
+        }
+        """
+    )
+
+    assert directive.target_slot == "decision_rules"
+    assert directive.answer_mode == "replace"
+    assert directive.ready_to_finalize is False
+
+
+def test_render_interview_planner_system_prompt_includes_json_contract(tmp_role_home):
+    session = begin_role_interview("self", user_language="中文")
+    session = submit_interview_answer(
+        session,
+        "I am an AI product strategist who moved from delivery work into role engineering, and I now focus on building long-term human-AI collaboration systems.",
+    )
+
+    prompt = render_interview_planner_system_prompt(session)
+
+    assert "JSON 契约" in prompt
+    assert "用户语言" in prompt
+    assert "中文" in prompt
+    assert '"target_slot"' in prompt
+    assert '"answer_mode"' in prompt
     assert "communication_style" in prompt
     assert "AI product strategist" in prompt
 
