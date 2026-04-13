@@ -225,11 +225,16 @@
 - 写入前必须执行安全扫描
 - 记忆系统应区分“总是在 prompt 中的关键记忆”和“按需检索的深层记忆”
 
-对应到 `roleMe`，第一版建议采用“核心记忆引擎优先”的结构。Hermes 值得借鉴的是机制和边界，不是它表面的脚本形态或命令拆分。
+对应到 `roleMe`，第一版建议采用“声明优先 + 极小工具层”的结构。Hermes 值得借鉴的是机制和边界，不是它表面的脚本形态或命令拆分。
 
 ### 核心记忆引擎
 
-应在当前仓库中实现一个统一的 memory engine，作为所有记忆脚本和 skill 调用的底座。这个引擎至少负责：
+第一版仍然需要一个统一的记忆执行层，但不建议一开始拆成过多模块。更合适的做法是：
+
+- 将“何时常驻加载、何时渐进加载、何时 recall、何时写记忆”的策略尽量声明在 `AGENT.md`
+- 将“安全写文件、去重、构建冻结快照、摘要优先检索”这类确定性操作收敛到一个轻量工具文件中
+
+这个工具层至少负责：
 
 - `memory/USER.md` 与 `memory/MEMORY.md` 的读写
 - 去重与唯一匹配替换
@@ -238,35 +243,30 @@
 - 会话激活时的冻结快照构建
 - `memory/episodes/` 的检索与摘要提升
 
-建议的模块边界如下：
+第一版建议的轻量边界如下：
 
 ```text
-lib/roleme/
-  memory/
-    engine.py
-    stores.py
-    security.py
-    snapshot.py
-    retrieval.py
+tools/
+  memory.py
 ```
 
-其中：
+其中 `memory.py` 统一承担：
 
-- `engine.py` 提供统一入口，协调各子模块
-- `stores.py` 负责 `USER.md`、`MEMORY.md`、`episodes/` 的存取规则
-- `security.py` 负责 prompt injection、不可见字符、角色覆盖型指令等扫描
-- `snapshot.py` 负责构建“当前会话注入用”的冻结记忆块
-- `retrieval.py` 负责摘要优先、情节层回退的检索逻辑
+- `USER.md`、`MEMORY.md`、`episodes/` 的存取规则
+- prompt injection、不可见字符、角色覆盖型指令等扫描
+- 当前会话注入用冻结记忆块的构建
+- 摘要优先、情节层回退的检索逻辑
+- `recall`、`write`、`summarize_and_write`、`promote`、`compact` 等统一入口
 
 ### 可选入口层
 
-在核心引擎之上，可以按需提供少量独立入口，但它们不是架构中心。它们只在以下场景下才有必要存在：
+在核心记忆工具之上，可以按需提供少量独立入口，但它们不是架构中心。它们只在以下场景下才有必要存在：
 
-- skill 运行时需要进程级调用入口
+- skill 运行时需要通过确定性工具触发文件操作
 - 构建、校验、测试需要命令行入口
 - 某些操作适合被单独复用
 
-如果没有这些需求，功能应直接落在 `lib/roleme/memory/` 中，由 skill 运行时直接调用，而不是人为拆成一组脚本。
+如果没有这些需求，功能应直接落在 `tools/memory.py` 中，由 skill 运行时按需调用，而不是人为拆成一组更细的脚本。
 
 若确实需要命令行入口，建议仅保留少量薄封装，例如：
 
@@ -283,7 +283,7 @@ lib/roleme/
 - `scripts/memory/validate_memory.py`
   - 校验 `memory/` 目录结构与内容
 
-这些入口只是 `roleMe` 自己的工程化选择，不是 Hermes 仓库中的现成脚本列表，也不是第一版必须全部存在的交付物。
+这些入口只是 `roleMe` 自己的工程化选择，不是 Hermes 仓库中的现成脚本列表，也不是第一版必须全部存在的交付物。第一版完全可以只保留一个 `tools/memory.py`，而不额外拆出 `scripts/memory/`。
 
 ### 冻结快照规则
 
@@ -442,14 +442,9 @@ lib/roleme/
 为了让“仓库开发”和“skill 打包”之间的边界清晰，建议源码层采用类似下面的组织方式：
 
 ```text
-lib/
-  roleme/
-    memory/
-      engine.py
-      stores.py
-      security.py
-      snapshot.py
-      retrieval.py
+tools/
+  role_ops.py
+  memory.py
 templates/
 scripts/
   build_skill.py
@@ -463,11 +458,11 @@ skill/
 
 其中：
 
-- `lib/roleme/` 负责可复用的核心运行时逻辑
+- `tools/` 负责最终 skill 运行时真正需要的轻量工具代码
 - `templates/` 负责角色初始化时生成的目录与文档模板
-- `scripts/` 默认只放构建、校验、升级这类工程脚本
-- 若未来确实需要进程级记忆入口，再新增 `scripts/memory/`，并保持薄封装
-- `scripts/build_skill.py` 负责把模板、核心模块、references 和 skill 定义复制到打包目录
+- `scripts/` 只放开发仓库内部使用的构建、校验、升级脚本
+- 若未来确实需要更多命令行入口，优先先评估是否直接写进 `tools/` 即可，不必先增加新脚本目录
+- `scripts/build_skill.py` 负责把模板、运行时工具、references 和 skill 定义复制到打包目录
 - `skill/` 负责最终 skill 的源定义，而不是用户角色数据
 
 ### 模板需要同步改造的部分
@@ -505,18 +500,32 @@ skill/
 
 ## Skill 产物布局
 
-最终构建出的产物应当是可分发、带版本号的 skill 目录，例如：
+最终构建出的产物应当是可分发、带版本号的 skill 目录。第一版建议区分“最小必需产物”和“按需附带产物”。
+
+最小必需产物例如：
 
 ```text
 dist/roleme-v0.1.0/
   SKILL.md
   agents/openai.yaml
-  lib/
-    roleme/
-  scripts/
-  references/
+  tools/
+    role_ops.py
+    memory.py
   assets/templates/
 ```
+
+按需附带的产物例如：
+
+```text
+dist/roleme-v0.1.0/
+  references/
+```
+
+其中：
+
+- `references/` 只在 `SKILL.md` 明确依赖辅助说明、schema 说明或外部资料摘要时才进入最终产物
+- `scripts/build_skill.py` 是仓库内的开发期出包脚本，不进入最终 skill 产物
+- `scripts/validate_role.py` 和 `scripts/upgrade_role.py` 保留在开发仓库中，用于开发期校验和迁移，不进入最终 skill 产物
 
 建议第一批构建脚本包括：
 
@@ -526,23 +535,25 @@ dist/roleme-v0.1.0/
 
 ### 打包规则
 
-是的，运行时脚本应当在此仓库中创建，然后在构建 skill 时复制进最终产物，而不是在导出阶段临时拼接。
+是的，运行时脚本应当在此仓库中创建，然后在构建 skill 时复制“确实需要随 skill 分发的那一部分”，而不是在导出阶段临时拼接。
 
 建议 `build_skill.py` 承担以下职责：
 
-- 从仓库内的 `skill/` 复制 `SKILL.md`、`agents/openai.yaml` 和 `references/`
+- 从仓库内的 `skill/` 复制 `SKILL.md`、`agents/openai.yaml`
+- 若 `SKILL.md` 或运行时约定确实依赖辅助资料，再复制 `references/`
 - 从仓库内的 `templates/` 复制角色模板到产物的 `assets/templates/`
-- 从仓库内的 `lib/` 复制核心运行时模块到产物的 `lib/`
-- 从仓库内的 `scripts/` 复制构建所需或运行时确有必要的入口脚本到产物的 `scripts/`
+- 从仓库内的 `tools/` 复制最终 skill 真正需要的轻量运行时工具到产物的 `tools/`
+- `scripts/build_skill.py` 自身保留在源码仓库中，不复制进最终产物
 - 写入 skill 版本号并生成最终 `dist/roleme-vX.Y.Z/`
 - 对产物执行一次基础校验，确保关键文件完整
 
 这意味着：
 
 - 角色初始化、记忆处理、校验升级都以源码形式维护在当前仓库
-- 核心逻辑应优先沉淀在 `lib/roleme/`，而不是分散在脚本里
+- 核心逻辑应优先沉淀在 `tools/`，而不是分散在开发脚本里
 - skill 打包只是“复制与封装”，不是重新生成逻辑
 - 后续如果升级记忆策略，只需要更新仓库里的核心模块并重新 build skill
+- 最终产物不应包含测试文件、仓库文档、Git 元数据和其他仅开发期使用的配置
 
 ## 安全性与可移植性
 
