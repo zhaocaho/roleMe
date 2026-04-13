@@ -51,7 +51,12 @@ def build_frozen_snapshot(role_path: Path, max_chars: int = 2_000) -> str:
     for relative in RESIDENT_PATHS:
         header = f"## {relative}\n"
         content_budget = max(0, section_budget - len(header))
-        content = (role_path / relative).read_text(encoding="utf-8").strip()[:content_budget]
+        path = role_path / relative
+        if relative.startswith("memory/"):
+            content = "\n".join(_read_entries(path))
+        else:
+            content = path.read_text(encoding="utf-8").strip()
+        content = content[:content_budget]
         chunks.append(f"{header}{content}")
     return "\n\n".join(chunks)[:max_chars]
 
