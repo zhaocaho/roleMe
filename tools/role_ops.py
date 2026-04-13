@@ -10,14 +10,14 @@ import shutil
 
 SCHEMA_VERSION = "1.0"
 RESIDENT_PATHS = [
-    "self-model/identity.md",
-    "self-model/communication-style.md",
-    "self-model/decision-rules.md",
+    "persona/narrative.md",
+    "persona/communication-style.md",
+    "persona/decision-rules.md",
     "memory/USER.md",
     "memory/MEMORY.md",
 ]
 ON_DEMAND_PATHS = [
-    "self-model/disclosure-layers.md",
+    "persona/disclosure-layers.md",
     "brain/index.md",
     "brain/topics",
     "projects/index.md",
@@ -31,10 +31,10 @@ REQUIRED_FILES = [
     "memory/USER.md",
     "memory/MEMORY.md",
     "projects/index.md",
-    "self-model/identity.md",
-    "self-model/communication-style.md",
-    "self-model/decision-rules.md",
-    "self-model/disclosure-layers.md",
+    "persona/narrative.md",
+    "persona/communication-style.md",
+    "persona/decision-rules.md",
+    "persona/disclosure-layers.md",
 ]
 
 
@@ -121,7 +121,7 @@ def initialize_role(role_name: str, skill_version: str) -> Path:
     if destination.exists():
         raise FileExistsError(f"Role already exists: {destination}")
 
-    for relative_dir in ["brain/topics", "memory/episodes", "projects", "self-model"]:
+    for relative_dir in ["brain/topics", "memory/episodes", "projects", "persona"]:
         (destination / relative_dir).mkdir(parents=True, exist_ok=True)
 
     for relative_file in [
@@ -130,10 +130,10 @@ def initialize_role(role_name: str, skill_version: str) -> Path:
         "memory/MEMORY.md",
         "memory/USER.md",
         "projects/index.md",
-        "self-model/communication-style.md",
-        "self-model/decision-rules.md",
-        "self-model/disclosure-layers.md",
-        "self-model/identity.md",
+        "persona/communication-style.md",
+        "persona/decision-rules.md",
+        "persona/disclosure-layers.md",
+        "persona/narrative.md",
     ]:
         _render(templates_dir() / relative_file, destination / relative_file, role_name)
 

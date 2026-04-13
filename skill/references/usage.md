@@ -4,14 +4,15 @@
 
 ## 这个 skill 是做什么的
 
-`roleMe` 用来初始化、加载、切换和维护“数字分身”角色包。  
-每个角色都放在本地：
+`roleMe` 用来初始化、加载、切换和维护“用户角色包”。
+
+每个角色都保存在本地：
 
 ```text
 ~/.roleMe/<角色名>/
 ```
 
-角色加载后，会优先带入稳定人格和核心记忆，再根据任务逐步展开知识、项目叠加层和更深记忆。
+角色加载后，不是让模型变成这个角色，而是让你在当前对话中以这个角色的身份被理解。助手仍然是助手，但会优先通过这个角色的身份、记忆、知识和项目上下文来理解你。
 
 ## 基本命令
 
@@ -55,7 +56,7 @@
 /roleMe optimize [角色名]
 ```
 
-主要用于整理与压缩记忆内容。
+主要用于整理和压缩记忆内容。
 
 ### 导出角色
 
@@ -79,9 +80,9 @@
 
 角色激活后，默认带入这些内容：
 
-- `self-model/identity.md`
-- `self-model/communication-style.md`
-- `self-model/decision-rules.md`
+- `persona/narrative.md`
+- `persona/communication-style.md`
+- `persona/decision-rules.md`
 - `memory/USER.md`
 - `memory/MEMORY.md`
 
@@ -89,17 +90,26 @@
 
 这些内容只在需要时再展开：
 
+- `persona/disclosure-layers.md`
 - `brain/index.md`
 - `brain/topics/*`
 - `projects/index.md`
 - `projects/<project-name>/*`
 - `memory/episodes/*`
 
+### 渐进式披露
+
+如果对话进入某个知识领域，助手应先查 `brain/index.md`，再一步一步进入相关主题文档，而不是一开始就加载全部知识文件。
+
+如果对话明显与某个项目有关，助手应先查 `projects/index.md`，再进入对应项目目录。
+
+如果摘要记忆不够，助手才回退到 `memory/episodes/*` 查看更细节的历史记录。
+
 ### 冻结快照
 
-角色激活时会根据常驻层生成当前会话使用的冻结快照。
+角色激活时，会根据常驻层生成当前会话使用的冻结快照。
 
-含义是：
+这意味着：
 
 - 新记忆会被写入本地文件
 - 但当前会话默认不会立刻重建常驻记忆块
@@ -111,7 +121,7 @@
 
 - `AGENT.md`
 - `role.json`
-- `self-model/`
+- `persona/`
 - `brain/index.md`
 - `memory/USER.md`
 - `memory/MEMORY.md`
@@ -132,7 +142,7 @@
 保存高价值摘要和索引，例如：
 
 - 已确认的重要习惯
-- 项目长期约定摘要
+- 长期结论摘要
 - 指向更深层记忆的入口
 
 ### `episodes/`
@@ -141,11 +151,12 @@
 
 ## 角色包可以直接复制吗
 
-可以。  
-只要 `schemaVersion` 兼容，角色目录可以直接复制到另一台机器的 `~/.roleMe/` 下使用。
+可以。
+
+只要 `schemaVersion` 兼容，角色目录就可以直接复制到另一台机器的 `~/.roleMe/` 下使用。
 
 ## 使用建议
 
 - 把真正稳定的偏好写进角色，而不是一次次重复告诉模型
-- 把项目级规则放在 `projects/`，不要混进基础人格层
-- 不要把所有背景都塞进 `AGENT.md`，让知识和细节进入按需层
+- 把项目级规则放在 `projects/`，不要混进基础身份层
+- 不要把所有背景都塞进 `AGENT.md`，让知识和细节按需展开

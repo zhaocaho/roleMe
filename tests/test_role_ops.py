@@ -8,15 +8,19 @@ def test_initialize_role_creates_required_files(tmp_role_home):
     assert (role_path / "role.json").exists()
     assert (role_path / "brain" / "topics").is_dir()
     assert (role_path / "memory" / "episodes").is_dir()
+    assert (role_path / "persona" / "narrative.md").exists()
+    assert not (role_path / "self-model").exists()
 
 
-def test_load_role_bundle_returns_resident_and_on_demand_paths(tmp_role_home):
+def test_load_role_bundle_returns_persona_resident_and_on_demand_paths(tmp_role_home):
     initialize_role("self", skill_version="0.1.0")
     bundle = load_role_bundle("self")
 
     assert bundle.role_name == "self"
+    assert "persona/narrative.md" in bundle.resident_files
     assert "memory/MEMORY.md" in bundle.resident_files
-    assert "memory/episodes" in bundle.on_demand_paths
+    assert "persona/disclosure-layers.md" in bundle.on_demand_paths
+    assert "brain/index.md" in bundle.on_demand_paths
 
 
 def test_list_roles_returns_sorted_names(tmp_role_home):
