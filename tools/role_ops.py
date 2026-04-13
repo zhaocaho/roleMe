@@ -7,6 +7,8 @@ import json
 import os
 import shutil
 
+from tools.context_router import build_context_snapshot, discover_context_paths
+
 
 SCHEMA_VERSION = "1.0"
 RESIDENT_PATHS = [
@@ -88,6 +90,15 @@ class RoleBundle:
 
 
 @dataclass(frozen=True)
+class QueryContextBundle:
+    role_name: str
+    role_path: str
+    resident_files: dict[str, str]
+    discovered_paths: list[str]
+    context_snapshot: str
+
+
+@dataclass(frozen=True)
 class DoctorReport:
     missing_files: list[str]
     warnings: list[str]
@@ -154,6 +165,37 @@ def load_role_bundle(role_name: str) -> RoleBundle:
         role_path=str(base_path),
         resident_files=resident_files,
         on_demand_paths=ON_DEMAND_PATHS,
+    )
+
+
+def load_query_context_bundle(
+    role_name: str,
+    query: str,
+    max_chars: int = 4_000,
+    max_brain_depth: int = 1,
+) -> QueryContextBundle:
+    base_path = role_dir(role_name)
+    resident_files = {
+        relative: (base_path / relative).read_text(encoding="utf-8")
+        for relative in RESIDENT_PATHS
+    }
+    discovered_paths = discover_context_paths(
+        base_path,
+        query=query,
+        max_brain_depth=max_brain_depth,
+    )
+    context_snapshot = build_context_snapshot(
+        base_path,
+        query=query,
+        max_chars=max_chars,
+        max_brain_depth=max_brain_depth,
+    )
+    return QueryContextBundle(
+        role_name=role_name,
+        role_path=str(base_path),
+        resident_files=resident_files,
+        discovered_paths=discovered_paths,
+        context_snapshot=context_snapshot,
     )
 
 
