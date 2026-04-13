@@ -7,9 +7,9 @@ import re
 ENTRY_START = "<!-- ROLEME:ENTRIES:START -->"
 ENTRY_END = "<!-- ROLEME:ENTRIES:END -->"
 RESIDENT_PATHS = [
-    "self-model/identity.md",
-    "self-model/communication-style.md",
-    "self-model/decision-rules.md",
+    "persona/narrative.md",
+    "persona/communication-style.md",
+    "persona/decision-rules.md",
     "memory/USER.md",
     "memory/MEMORY.md",
 ]
@@ -18,12 +18,13 @@ UNSAFE_PATTERNS = [
     re.compile(r"system prompt", re.IGNORECASE),
     re.compile(r"[\u200b-\u200f\u2060\ufeff]"),
 ]
+SPLIT_PATTERN = re.compile(r"[;\n]+")
 
 
 def _read_entries(path: Path) -> list[str]:
     text = path.read_text(encoding="utf-8")
     block = text.split(ENTRY_START, maxsplit=1)[1].split(ENTRY_END, maxsplit=1)[0]
-    return [line for line in block.strip().splitlines() if line.strip()]
+    return [line.strip() for line in block.strip().splitlines() if line.strip()]
 
 
 def _replace_entries(path: Path, entries: list[str]) -> None:
@@ -45,6 +46,22 @@ def _is_safe(text: str) -> bool:
     return not any(pattern.search(text) for pattern in UNSAFE_PATTERNS)
 
 
+def _normalize_entry(content: str) -> str:
+    return f"- {content.strip().strip('-').strip()}"
+
+
+def _store_name(target: str) -> str:
+    if target == "memory":
+        return "MEMORY.md"
+    if target in {"user", "preference"}:
+        return "USER.md"
+    raise ValueError(f"Unsupported memory target: {target}")
+
+
+def _store_path(role_path: Path, target: str) -> Path:
+    return role_path / "memory" / _store_name(target)
+
+
 def build_frozen_snapshot(role_path: Path, max_chars: int = 2_000) -> str:
     section_budget = max(1, max_chars // len(RESIDENT_PATHS))
     chunks: list[str] = []
@@ -56,8 +73,7 @@ def build_frozen_snapshot(role_path: Path, max_chars: int = 2_000) -> str:
             content = "\n".join(_read_entries(path))
         else:
             content = path.read_text(encoding="utf-8").strip()
-        content = content[:content_budget]
-        chunks.append(f"{header}{content}")
+        chunks.append(f"{header}{content[:content_budget]}")
     return "\n\n".join(chunks)[:max_chars]
 
 
@@ -65,28 +81,69 @@ def write_memory(role_path: Path, target: str, content: str):
     if target == "episode":
         episodes_dir = role_path / "memory" / "episodes"
         episode_path = episodes_dir / f"episode-{len(list(episodes_dir.glob('*.md'))) + 1:03d}.md"
-        episode_path.write_text(content, encoding="utf-8")
+        episode_path.write_text(content.strip() + "\n", encoding="utf-8")
         return episode_path
 
-    store_name = "MEMORY.md" if target == "memory" else "USER.md"
-    store_path = role_path / "memory" / store_name
-    bullet = f"- {content.strip()}"
-    if _is_safe(bullet):
-        entries = _read_entries(store_path)
-        if bullet not in entries:
-            _replace_entries(store_path, entries + [bullet])
+    store_path = _store_path(role_path, target)
+    bullet = _normalize_entry(content)
+    if not _is_safe(bullet):
+        return None
+
+    entries = _read_entries(store_path)
+    if bullet not in entries:
+        _replace_entries(store_path, entries + [bullet])
     return None
 
 
+def replace_memory_entry(
+    role_path: Path,
+    target: str,
+    old_content: str,
+    new_content: str,
+) -> bool:
+    store_path = _store_path(role_path, target)
+    old_bullet = _normalize_entry(old_content)
+    new_bullet = _normalize_entry(new_content)
+    if not _is_safe(new_bullet):
+        return False
+
+    entries = _read_entries(store_path)
+    try:
+        index = entries.index(old_bullet)
+    except ValueError:
+        return False
+
+    updated_entries = list(entries)
+    updated_entries[index] = new_bullet
+    deduped_entries: list[str] = []
+    for entry in updated_entries:
+        if entry not in deduped_entries:
+            deduped_entries.append(entry)
+    _replace_entries(store_path, deduped_entries)
+    return True
+
+
+def remove_memory_entry(role_path: Path, target: str, content: str) -> bool:
+    store_path = _store_path(role_path, target)
+    bullet = _normalize_entry(content)
+    entries = _read_entries(store_path)
+    if bullet not in entries:
+        return False
+
+    _replace_entries(store_path, [entry for entry in entries if entry != bullet])
+    return True
+
+
 def summarize_and_write(role_path: Path, target: str, source_text: str) -> None:
-    store_name = "MEMORY.md" if target == "memory" else "USER.md"
-    store_path = role_path / "memory" / store_name
+    store_path = _store_path(role_path, target)
     entries = _read_entries(store_path)
     seen = set(entries)
-    fragments = [part.strip(" 。；;") for part in re.split(r"[；;。\n]+", source_text) if part.strip()]
     normalized: list[str] = []
-    for fragment in fragments:
-        bullet = f"- {fragment}"
+    for fragment in SPLIT_PATTERN.split(source_text):
+        clean_fragment = fragment.strip(" .。；;")
+        if not clean_fragment:
+            continue
+        bullet = _normalize_entry(clean_fragment)
         if bullet not in seen and _is_safe(bullet):
             seen.add(bullet)
             normalized.append(bullet)
@@ -94,8 +151,13 @@ def summarize_and_write(role_path: Path, target: str, source_text: str) -> None:
 
 
 def recall(role_path: Path, query: str) -> dict[str, list[str]]:
-    summary_entries = _read_entries(role_path / "memory" / "MEMORY.md")
-    summary_hits = [entry for entry in summary_entries if query in entry]
+    summary_hits: list[str] = []
+    for relative in ["memory/USER.md", "memory/MEMORY.md"]:
+        summary_hits.extend(
+            entry
+            for entry in _read_entries(role_path / relative)
+            if query in entry
+        )
     if summary_hits:
         return {"summary_hits": summary_hits, "episode_hits": []}
 
@@ -108,7 +170,6 @@ def recall(role_path: Path, query: str) -> dict[str, list[str]]:
 
 
 def compact_memory(role_path: Path, target: str, max_entries: int) -> None:
-    store_name = "MEMORY.md" if target == "memory" else "USER.md"
-    store_path = role_path / "memory" / store_name
+    store_path = _store_path(role_path, target)
     entries = _read_entries(store_path)
-    _replace_entries(store_path, entries[:max_entries])
+    _replace_entries(store_path, entries[-max_entries:])

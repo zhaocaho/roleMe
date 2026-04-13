@@ -5,11 +5,12 @@ description: Use when the user wants to initialize, switch, inspect, optimize, e
 
 # roleMe
 
-`/roleMe` 默认加载 `self`，若不存在则进入初始化流程。
+`/roleMe` 默认加载 `self`，如果不存在则进入初始化流程。
 
 详细使用说明见 `references/usage.md`。
 
 命令面：
+
 - `/roleMe`
 - `/roleMe <角色名>`
 - `/roleMe list`
@@ -19,7 +20,9 @@ description: Use when the user wants to initialize, switch, inspect, optimize, e
 - `/roleMe doctor [角色名]`
 
 运行时原则：
+
+- `roleMe` 管理的是用户角色上下文，而不是助手人格切换
 - 常驻层与渐进层的边界由角色包内的 `AGENT.md` 决定
 - 对话中的记忆触发优先依赖 `AGENT.md` 声明的策略，而不是额外命令
-- 只有确定性的文件操作才调用 `tools/role_ops.py` 或 `tools/memory.py`
+- 只有确定性的文件操作才调用 `tools/role_ops.py`、`tools/memory.py` 或 `tools/context_router.py`
 - 打包产物中不包含开发仓库的 `scripts/`
