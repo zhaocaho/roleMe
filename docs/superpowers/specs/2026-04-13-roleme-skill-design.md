@@ -212,6 +212,91 @@
 - 检索时优先查摘要层，再按需读取情节层
 - 将常驻记忆控制在固定预算内
 
+### Hermes 对齐后的核心实现思路
+
+这一部分不应简单照搬 Hermes 的文件名或工具表面，而应借鉴它的核心机制：
+
+- 持久记忆应有明确的容量边界
+- 常驻记忆应在会话开始时注入，并采用“冻结快照”策略
+- 记忆写入应立即持久化，但不强制刷新当前会话的常驻 prompt
+- 写入前必须执行安全扫描
+- 记忆系统应区分“总是在 prompt 中的关键记忆”和“按需检索的深层记忆”
+
+对应到 `roleMe`，第一版建议采用“核心记忆引擎 + 外层脚本包装”的结构，而不是把所有能力散落在彼此独立的脚本中。
+
+### 核心记忆引擎
+
+应在当前仓库中实现一个统一的 memory engine，作为所有记忆脚本和 skill 调用的底座。这个引擎至少负责：
+
+- `memory/USER.md` 与 `memory/MEMORY.md` 的读写
+- 去重与唯一匹配替换
+- 容量限制与压缩策略
+- 安全扫描
+- 会话激活时的冻结快照构建
+- `memory/episodes/` 的检索与摘要提升
+
+建议的模块边界如下：
+
+```text
+lib/roleme/
+  memory/
+    engine.py
+    stores.py
+    security.py
+    snapshot.py
+    retrieval.py
+```
+
+其中：
+
+- `engine.py` 提供统一入口，协调各子模块
+- `stores.py` 负责 `USER.md`、`MEMORY.md`、`episodes/` 的存取规则
+- `security.py` 负责 prompt injection、不可见字符、角色覆盖型指令等扫描
+- `snapshot.py` 负责构建“当前会话注入用”的冻结记忆块
+- `retrieval.py` 负责摘要优先、情节层回退的检索逻辑
+
+### 脚本层
+
+在核心引擎之上，再提供可独立调用的脚本。这些脚本本身应尽量保持薄封装，主要负责参数解析、调用引擎、输出结果。
+
+建议的第一批脚本如下：
+
+- `scripts/memory/append_memory.py`
+  - 向 `memory/episodes/` 追加一条新的情节型记忆
+  - 写入基础元数据，例如时间、来源、主题标签
+- `scripts/memory/retrieve_memory.py`
+  - 优先读取 `MEMORY.md`
+  - 在摘要层不足时回退到 `memory/episodes/`
+- `scripts/memory/summarize_memory.py`
+  - 将 episodic memory 压缩成候选摘要
+  - 输出可写入 `MEMORY.md` 的结构化结果
+- `scripts/memory/promote_memory.py`
+  - 将高价值候选摘要正式提升到 `MEMORY.md`
+  - 写入前执行去重与冲突检查
+- `scripts/memory/compact_memory.py`
+  - 控制 `MEMORY.md` 和 `USER.md` 的体积
+  - 在超出预算时执行压缩、合并和重写
+- `scripts/memory/validate_memory.py`
+  - 校验 `memory/` 目录结构
+  - 检查格式问题、缺失文件和异常条目
+- `scripts/memory/sanitize_memory.py`
+  - 对待写入常驻层的内容执行基础安全扫描
+  - 重点检查 prompt injection、角色覆盖型指令和明显冲突内容
+
+这组脚本是 `roleMe` 对 Hermes 思路的工程化适配，不是 Hermes 仓库中的现成脚本列表。
+
+### 冻结快照规则
+
+为了贴近 Hermes 的可预测行为，`roleMe` 的常驻记忆加载规则应明确为：
+
+- 角色激活时读取 `USER.md` 与 `MEMORY.md`
+- 生成当前会话使用的“冻结快照”
+- 本会话中新增或修改的记忆应立即持久化到角色目录
+- 但默认不自动刷新当前会话的常驻记忆块
+- 若用户显式执行重新加载或切换角色，则重新构建快照
+
+这个规则可以降低提示词漂移，保证会话中的角色行为更加稳定。
+
 ### 记忆安全
 
 由于常驻记忆会直接进入后续提示词，在将内容提升到常驻文件前，系统应执行基础的 prompt injection 与指令冲突扫描。
@@ -301,11 +386,85 @@
 
 - 模板
 - skill 源码
+- 记忆脚本与其他运行时脚本
 - 校验与迁移脚本
 - 参考资料与示例
 - 构建产物
 
 它不应该默认承担个人角色数据仓库的职责。
+
+### 建议源码布局
+
+为了让“仓库开发”和“skill 打包”之间的边界清晰，建议源码层采用类似下面的组织方式：
+
+```text
+lib/
+  roleme/
+    memory/
+      engine.py
+      stores.py
+      security.py
+      snapshot.py
+      retrieval.py
+templates/
+scripts/
+  memory/
+    append_memory.py
+    retrieve_memory.py
+    summarize_memory.py
+    promote_memory.py
+    compact_memory.py
+    validate_memory.py
+    sanitize_memory.py
+  build_skill.py
+  validate_role.py
+  upgrade_role.py
+skill/
+  SKILL.md
+  references/
+  agents/
+```
+
+其中：
+
+- `lib/roleme/` 负责可复用的核心运行时逻辑
+- `templates/` 负责角色初始化时生成的目录与文档模板
+- `scripts/memory/` 负责对核心记忆引擎的薄封装
+- `scripts/build_skill.py` 负责把模板、脚本、references 和 skill 定义复制到打包目录
+- `skill/` 负责最终 skill 的源定义，而不是用户角色数据
+
+### 模板需要同步改造的部分
+
+为了让模板真正适配 Hermes 风格的记忆机制，第一版应同步改造以下模板：
+
+- `templates/AGENT.md`
+  - 增加“常驻记忆快照在角色激活时生成”的说明
+  - 明确本会话写入记忆后默认不会自动刷新常驻块，除非重新加载
+- `templates/memory/MEMORY.md`
+  - 从纯说明性模板改为“说明区 + 机器可维护条目区”
+  - 保留人类可读性，同时为脚本提供稳定编辑边界
+- `templates/memory/USER.md`
+  - 同样改为“说明区 + 机器可维护条目区”
+  - 适合保存稳定偏好、长期约定和持久事实
+- `templates/projects/index.md`
+  - 明确项目层是按需加载，不应与基础人格层混写
+- `templates/self-model/disclosure-layers.md`
+  - 明确常驻层、按需层、深层的加载边界，与冻结快照规则保持一致
+
+推荐 `MEMORY.md` 和 `USER.md` 都采用稳定标记块，便于脚本安全更新，例如：
+
+```markdown
+# 记忆索引
+
+[说明性文字]
+
+<!-- ROLEME:ENTRIES:START -->
+- 条目 A
+- 条目 B
+<!-- ROLEME:ENTRIES:END -->
+```
+
+这样既保留了 Markdown 的可读性，也避免脚本在自由文本中做脆弱替换。
 
 ## Skill 产物布局
 
@@ -315,7 +474,10 @@
 dist/roleme-v0.1.0/
   SKILL.md
   agents/openai.yaml
+  lib/
+    roleme/
   scripts/
+    memory/
   references/
   assets/templates/
 ```
@@ -325,6 +487,25 @@ dist/roleme-v0.1.0/
 - `scripts/build_skill.py`
 - `scripts/validate_role.py`
 - `scripts/upgrade_role.py`
+
+### 打包规则
+
+是的，运行时脚本应当在此仓库中创建，然后在构建 skill 时复制进最终产物，而不是在导出阶段临时拼接。
+
+建议 `build_skill.py` 承担以下职责：
+
+- 从仓库内的 `skill/` 复制 `SKILL.md`、`agents/openai.yaml` 和 `references/`
+- 从仓库内的 `templates/` 复制角色模板到产物的 `assets/templates/`
+- 从仓库内的 `lib/` 复制核心运行时模块到产物的 `lib/`
+- 从仓库内的 `scripts/` 复制运行时脚本到产物的 `scripts/`
+- 写入 skill 版本号并生成最终 `dist/roleme-vX.Y.Z/`
+- 对产物执行一次基础校验，确保关键文件完整
+
+这意味着：
+
+- 角色初始化、记忆处理、校验升级都以源码形式维护在当前仓库
+- skill 打包只是“复制与封装”，不是重新生成逻辑
+- 后续如果升级记忆策略，只需要更新仓库里的核心模块或脚本并重新 build skill
 
 ## 安全性与可移植性
 
