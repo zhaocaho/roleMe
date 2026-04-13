@@ -6,10 +6,17 @@ from tools.context_router import (
 )
 from tools.memory import build_frozen_snapshot, summarize_and_write
 from tools.role_ops import (
+    RoleInterview,
+    RoleInterviewProject,
+    RoleInterviewTopic,
+    begin_role_interview,
     doctor_role,
+    finalize_role_interview,
     initialize_role,
+    initialize_role_from_interview,
     load_query_context_bundle,
     load_role_bundle,
+    submit_interview_answer,
 )
 
 
@@ -38,19 +45,19 @@ def test_role_roundtrip_init_load_write_memory_and_package(tmp_role_home, tmp_pa
 def test_role_roundtrip_discovers_brain_topics_progressively(tmp_role_home):
     role_path = initialize_role("self", skill_version="0.1.0")
     (role_path / "brain" / "topics" / "ai-product.md").write_text(
-        "# AI 产品\n\n聚焦 AI 产品策略。\n\n- 延伸阅读: topics/pricing.md\n",
+        "# AI Product\n\nFocus on AI product strategy.\n\n- Related: topics/pricing.md\n",
         encoding="utf-8",
     )
     (role_path / "brain" / "topics" / "pricing.md").write_text(
-        "# 定价\n\n讨论 AI 产品定价与包装。\n",
+        "# Pricing\n\nDiscuss AI product pricing and packaging.\n",
         encoding="utf-8",
     )
     (role_path / "brain" / "index.md").write_text(
-        "# 知识索引\n\n- AI 产品: topics/ai-product.md\n",
+        "# Knowledge Index\n\n- AI Product: topics/ai-product.md\n",
         encoding="utf-8",
     )
 
-    discovered = discover_brain_paths(role_path, query="我想讨论 AI 产品定价", max_depth=2)
+    discovered = discover_brain_paths(role_path, query="I want to discuss AI product pricing", max_depth=2)
 
     assert discovered == [
         "brain/index.md",
@@ -64,25 +71,25 @@ def test_role_roundtrip_combines_project_and_brain_discovery(tmp_role_home):
     project_dir = role_path / "projects" / "roleme"
     project_dir.mkdir(parents=True, exist_ok=True)
     (role_path / "brain" / "topics" / "ai-product.md").write_text(
-        "# AI 产品\n\n聚焦 AI 产品策略与落地。\n",
+        "# AI Product\n\nFocus on AI product strategy and execution.\n",
         encoding="utf-8",
     )
     (role_path / "brain" / "index.md").write_text(
-        "# 知识索引\n\n- AI 产品: topics/ai-product.md\n",
+        "# Knowledge Index\n\n- AI Product: topics/ai-product.md\n",
         encoding="utf-8",
     )
     (role_path / "projects" / "index.md").write_text(
-        "# 项目索引\n\n- roleMe 重构: projects/roleme/context.md\n",
+        "# Project Index\n\n- roleMe refactor: projects/roleme/context.md\n",
         encoding="utf-8",
     )
     (project_dir / "context.md").write_text(
-        "# roleMe 重构\n\n当前重构关注用户角色上下文与 AI 产品知识融合。\n\n- 参考知识: brain/topics/ai-product.md\n",
+        "# roleMe refactor\n\nThis refactor connects user role context with AI product knowledge.\n- Reference: brain/topics/ai-product.md\n",
         encoding="utf-8",
     )
 
     discovered = discover_context_paths(
         role_path,
-        query="这个 roleMe 重构里的 AI 产品策略怎么设计",
+        query="How should we design AI product strategy in the roleMe refactor?",
         max_brain_depth=1,
     )
 
@@ -97,31 +104,31 @@ def test_role_roundtrip_combines_project_and_brain_discovery(tmp_role_home):
 def test_role_roundtrip_builds_query_specific_context_snapshot(tmp_role_home):
     role_path = initialize_role("self", skill_version="0.1.0")
     (role_path / "persona" / "narrative.md").write_text(
-        "# 人物自述\n\n我是一个重视 AI 产品策略的人。\n",
+        "# Narrative\n\nI focus on AI product strategy.\n",
         encoding="utf-8",
     )
     project_dir = role_path / "projects" / "roleme"
     project_dir.mkdir(parents=True, exist_ok=True)
     (role_path / "brain" / "topics" / "ai-product.md").write_text(
-        "# AI 产品\n\n聚焦 AI 产品策略与落地。\n",
+        "# AI Product\n\nFocus on AI product strategy and execution.\n",
         encoding="utf-8",
     )
     (role_path / "brain" / "index.md").write_text(
-        "# 知识索引\n\n- AI 产品: topics/ai-product.md\n",
+        "# Knowledge Index\n\n- AI Product: topics/ai-product.md\n",
         encoding="utf-8",
     )
     (role_path / "projects" / "index.md").write_text(
-        "# 项目索引\n\n- roleMe 重构: projects/roleme/context.md\n",
+        "# Project Index\n\n- roleMe refactor: projects/roleme/context.md\n",
         encoding="utf-8",
     )
     (project_dir / "context.md").write_text(
-        "# roleMe 重构\n\n当前重构关注用户角色上下文与 AI 产品知识融合。\n\n- 参考知识: brain/topics/ai-product.md\n",
+        "# roleMe refactor\n\nThis refactor connects user role context with AI product knowledge.\n- Reference: brain/topics/ai-product.md\n",
         encoding="utf-8",
     )
 
     snapshot = build_context_snapshot(
         role_path,
-        query="这个 roleMe 重构里的 AI 产品策略怎么设计",
+        query="How should we design AI product strategy in the roleMe refactor?",
         max_chars=900,
         max_brain_depth=1,
     )
@@ -137,25 +144,25 @@ def test_role_roundtrip_loads_query_context_bundle(tmp_role_home):
     project_dir = role_path / "projects" / "roleme"
     project_dir.mkdir(parents=True, exist_ok=True)
     (role_path / "brain" / "topics" / "ai-product.md").write_text(
-        "# AI 产品\n\n聚焦 AI 产品策略与落地。\n",
+        "# AI Product\n\nFocus on AI product strategy and execution.\n",
         encoding="utf-8",
     )
     (role_path / "brain" / "index.md").write_text(
-        "# 知识索引\n\n- AI 产品: topics/ai-product.md\n",
+        "# Knowledge Index\n\n- AI Product: topics/ai-product.md\n",
         encoding="utf-8",
     )
     (role_path / "projects" / "index.md").write_text(
-        "# 项目索引\n\n- roleMe 重构: projects/roleme/context.md\n",
+        "# Project Index\n\n- roleMe refactor: projects/roleme/context.md\n",
         encoding="utf-8",
     )
     (project_dir / "context.md").write_text(
-        "# roleMe 重构\n\n当前重构关注用户角色上下文与 AI 产品知识融合。\n\n- 参考知识: brain/topics/ai-product.md\n",
+        "# roleMe refactor\n\nThis refactor connects user role context with AI product knowledge.\n- Reference: brain/topics/ai-product.md\n",
         encoding="utf-8",
     )
 
     bundle = load_query_context_bundle(
         "self",
-        query="这个 roleMe 重构里的 AI 产品策略怎么设计",
+        query="How should we design AI product strategy in the roleMe refactor?",
         max_chars=900,
         max_brain_depth=1,
     )
@@ -170,3 +177,92 @@ def test_role_roundtrip_loads_query_context_bundle(tmp_role_home):
     ]
     assert "## resident" in bundle.context_snapshot
     assert "## discovered" in bundle.context_snapshot
+
+
+def test_role_roundtrip_initializes_from_interview_and_supports_query_context(tmp_role_home):
+    interview = RoleInterview(
+        narrative="I focus on AI product strategy and role engineering.",
+        communication_style="Default to Chinese and lead with the conclusion.",
+        decision_rules="Prioritize execution, then consistency, then maintainability.",
+        disclosure_layers="Start from resident context and expand on demand.",
+        user_memory=["Default language is Chinese", "Lead with the conclusion"],
+        memory_summary=["Long-term focus on AI product strategy"],
+        brain_topics=[
+            RoleInterviewTopic(
+                slug="ai-product",
+                title="AI Product",
+                summary="Focus on positioning and execution.",
+                content="# AI Product\n\nFocus on positioning and execution.\n",
+            )
+        ],
+        projects=[
+            RoleInterviewProject(
+                name="roleme",
+                context="This project is refactoring roleMe into a Hermes-like user role context system.",
+                overlay="Answer with both role engineering and AI product perspectives.",
+                memory=["Current priority is interview orchestration and progressive retrieval."],
+            )
+        ],
+    )
+
+    initialize_role_from_interview("self", skill_version="0.1.0", interview=interview)
+    bundle = load_query_context_bundle(
+        "self",
+        query="How should the roleMe project handle AI product strategy?",
+        max_chars=900,
+        max_brain_depth=1,
+    )
+
+    assert "persona/narrative.md" in bundle.resident_files
+    assert "brain/topics/ai-product.md" in bundle.discovered_paths
+    assert "projects/roleme/context.md" in bundle.discovered_paths
+    assert "AI Product" in bundle.context_snapshot
+
+
+def test_role_roundtrip_interview_session_materializes_and_supports_query_context(
+    tmp_role_home,
+):
+    session = begin_role_interview("self")
+
+    answers = {
+        "narrative": "I am an AI product strategist who moved from delivery work into role engineering, and I now focus on long-term human-AI collaboration systems.",
+        "communication_style": "Default to Chinese, lead with the conclusion, and keep collaboration direct and structured.",
+        "decision_rules": "Prioritize execution, then consistency, then maintainability.",
+        "disclosure_layers": "Start from resident context and expand only when needed.",
+        "user_memory": "- Default language is Chinese\n- Lead with the conclusion",
+        "memory_summary": "- Long-term focus on AI product strategy\n- Active roleMe refactor",
+        "brain_topics": "\n".join(
+            [
+                "title: AI Product",
+                "slug: ai-product",
+                "summary: Focus on positioning and execution.",
+                "content: # AI Product",
+                "",
+                "Focus on positioning and execution.",
+            ]
+        ),
+        "projects": "\n".join(
+            [
+                "name: roleme",
+                "context: This project is refactoring roleMe into a user role context system.",
+                "overlay: Answer with both role engineering and AI product perspectives.",
+                "memory: Current priority is interview orchestration | Progressive retrieval remains important.",
+            ]
+        ),
+    }
+
+    while session.current_stage != "review":
+        session = submit_interview_answer(session, answers[session.current_stage])
+
+    finalize_role_interview(session, skill_version="0.1.0")
+    bundle = load_query_context_bundle(
+        "self",
+        query="How should the roleMe project handle AI product strategy?",
+        max_chars=900,
+        max_brain_depth=1,
+    )
+
+    assert session.current_stage == "review"
+    assert "brain/topics/ai-product.md" in bundle.discovered_paths
+    assert "projects/roleme/context.md" in bundle.discovered_paths
+    assert "AI Product" in bundle.context_snapshot
