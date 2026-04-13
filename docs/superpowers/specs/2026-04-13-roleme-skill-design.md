@@ -222,7 +222,7 @@
 - 写入前必须执行安全扫描
 - 记忆系统应区分“总是在 prompt 中的关键记忆”和“按需检索的深层记忆”
 
-对应到 `roleMe`，第一版建议采用“核心记忆引擎 + 外层脚本包装”的结构，而不是把所有能力散落在彼此独立的脚本中。
+对应到 `roleMe`，第一版建议采用“核心记忆引擎优先”的结构。Hermes 值得借鉴的是机制和边界，不是它表面的脚本形态或命令拆分。
 
 ### 核心记忆引擎
 
@@ -255,35 +255,32 @@ lib/roleme/
 - `snapshot.py` 负责构建“当前会话注入用”的冻结记忆块
 - `retrieval.py` 负责摘要优先、情节层回退的检索逻辑
 
-### 脚本层
+### 可选入口层
 
-在核心引擎之上，再提供可独立调用的脚本。这些脚本本身应尽量保持薄封装，主要负责参数解析、调用引擎、输出结果。
+在核心引擎之上，可以按需提供少量独立入口，但它们不是架构中心。它们只在以下场景下才有必要存在：
 
-建议的第一批脚本如下：
+- skill 运行时需要进程级调用入口
+- 构建、校验、测试需要命令行入口
+- 某些操作适合被单独复用
+
+如果没有这些需求，功能应直接落在 `lib/roleme/memory/` 中，由 skill 运行时直接调用，而不是人为拆成一组脚本。
+
+若确实需要命令行入口，建议仅保留少量薄封装，例如：
 
 - `scripts/memory/append_memory.py`
   - 向 `memory/episodes/` 追加一条新的情节型记忆
-  - 写入基础元数据，例如时间、来源、主题标签
 - `scripts/memory/retrieve_memory.py`
-  - 优先读取 `MEMORY.md`
-  - 在摘要层不足时回退到 `memory/episodes/`
+  - 优先读取 `MEMORY.md`，不足时回退到 `memory/episodes/`
 - `scripts/memory/summarize_memory.py`
   - 将 episodic memory 压缩成候选摘要
-  - 输出可写入 `MEMORY.md` 的结构化结果
 - `scripts/memory/promote_memory.py`
-  - 将高价值候选摘要正式提升到 `MEMORY.md`
-  - 写入前执行去重与冲突检查
+  - 将高价值候选摘要提升到 `MEMORY.md`
 - `scripts/memory/compact_memory.py`
   - 控制 `MEMORY.md` 和 `USER.md` 的体积
-  - 在超出预算时执行压缩、合并和重写
 - `scripts/memory/validate_memory.py`
-  - 校验 `memory/` 目录结构
-  - 检查格式问题、缺失文件和异常条目
-- `scripts/memory/sanitize_memory.py`
-  - 对待写入常驻层的内容执行基础安全扫描
-  - 重点检查 prompt injection、角色覆盖型指令和明显冲突内容
+  - 校验 `memory/` 目录结构与内容
 
-这组脚本是 `roleMe` 对 Hermes 思路的工程化适配，不是 Hermes 仓库中的现成脚本列表。
+这些入口只是 `roleMe` 自己的工程化选择，不是 Hermes 仓库中的现成脚本列表，也不是第一版必须全部存在的交付物。
 
 ### 冻结快照规则
 
@@ -408,14 +405,6 @@ lib/
       retrieval.py
 templates/
 scripts/
-  memory/
-    append_memory.py
-    retrieve_memory.py
-    summarize_memory.py
-    promote_memory.py
-    compact_memory.py
-    validate_memory.py
-    sanitize_memory.py
   build_skill.py
   validate_role.py
   upgrade_role.py
@@ -429,8 +418,9 @@ skill/
 
 - `lib/roleme/` 负责可复用的核心运行时逻辑
 - `templates/` 负责角色初始化时生成的目录与文档模板
-- `scripts/memory/` 负责对核心记忆引擎的薄封装
-- `scripts/build_skill.py` 负责把模板、脚本、references 和 skill 定义复制到打包目录
+- `scripts/` 默认只放构建、校验、升级这类工程脚本
+- 若未来确实需要进程级记忆入口，再新增 `scripts/memory/`，并保持薄封装
+- `scripts/build_skill.py` 负责把模板、核心模块、references 和 skill 定义复制到打包目录
 - `skill/` 负责最终 skill 的源定义，而不是用户角色数据
 
 ### 模板需要同步改造的部分
@@ -477,7 +467,6 @@ dist/roleme-v0.1.0/
   lib/
     roleme/
   scripts/
-    memory/
   references/
   assets/templates/
 ```
@@ -497,15 +486,16 @@ dist/roleme-v0.1.0/
 - 从仓库内的 `skill/` 复制 `SKILL.md`、`agents/openai.yaml` 和 `references/`
 - 从仓库内的 `templates/` 复制角色模板到产物的 `assets/templates/`
 - 从仓库内的 `lib/` 复制核心运行时模块到产物的 `lib/`
-- 从仓库内的 `scripts/` 复制运行时脚本到产物的 `scripts/`
+- 从仓库内的 `scripts/` 复制构建所需或运行时确有必要的入口脚本到产物的 `scripts/`
 - 写入 skill 版本号并生成最终 `dist/roleme-vX.Y.Z/`
 - 对产物执行一次基础校验，确保关键文件完整
 
 这意味着：
 
 - 角色初始化、记忆处理、校验升级都以源码形式维护在当前仓库
+- 核心逻辑应优先沉淀在 `lib/roleme/`，而不是分散在脚本里
 - skill 打包只是“复制与封装”，不是重新生成逻辑
-- 后续如果升级记忆策略，只需要更新仓库里的核心模块或脚本并重新 build skill
+- 后续如果升级记忆策略，只需要更新仓库里的核心模块并重新 build skill
 
 ## 安全性与可移植性
 
