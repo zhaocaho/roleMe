@@ -54,13 +54,13 @@ python -m pip install -e ".[dev]"
 当前打包入口是 `scripts/build_skill.py` 中的 `build_skill()` 函数。可直接这样调用：
 
 ```bash
-./.venv/bin/python -c 'from pathlib import Path; from scripts.build_skill import build_skill; print(build_skill(Path("dist"), "0.1.0"))'
+./.venv/bin/python -c 'from pathlib import Path; from scripts.build_skill import build_skill; print(build_skill(Path("dist")))'
 ```
 
 打包结果会生成到：
 
 ```text
-dist/roleme-v0.1.0/
+dist/roleMe/
 ```
 
 当前产物默认包含：

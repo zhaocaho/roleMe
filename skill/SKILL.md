@@ -1,3 +1,8 @@
+---
+name: roleme
+description: Use when the user wants to initialize, switch, inspect, optimize, export, or diagnose a role bundle with /roleMe.
+---
+
 # roleMe
 
 `/roleMe` 默认加载 `self`，若不存在则进入初始化流程。

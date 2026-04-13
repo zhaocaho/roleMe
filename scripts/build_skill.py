@@ -8,9 +8,9 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def build_skill(output_root: Path, version: str) -> Path:
+def build_skill(output_root: Path) -> Path:
     root = repo_root()
-    destination = output_root / f"roleme-v{version}"
+    destination = output_root / "roleMe"
     if destination.exists():
         shutil.rmtree(destination)
 
