@@ -1,71 +1,90 @@
-# roleMe Skill 设计文档
+# roleMe Skill Design
 
-日期：2026-04-13
-状态：已确认，待进入规划
+Date: 2026-04-13
+Status: Confirmed, ready for implementation planning
 
-## 概述
+## Overview
 
-`roleMe` 是一个可复用的角色系统，用来初始化、加载、切换、优化和导出“数字分身”角色包。每个角色都存放在 `~/.roleMe/<角色名>/` 下，并且可以作为一个可移植目录，在不同机器或不同用户之间直接复制使用。
+`roleMe` is a portable user-role bundle skill for agent workflows.
 
-这套系统以“渐进式披露”作为一级架构原则：始终优先加载最小且稳定的角色核心，再根据任务需要逐步展开知识、项目上下文和深层记忆，而不是在会话开始时一次性加载整个角色包。
+Its core purpose is not to turn the model into a role. Its purpose is to let the user load a role as their own active identity context for the current conversation. After `/roleMe <role-name>`, the assistant remains an assistant, but it should interpret the user through the loaded role's identity, preferences, decision patterns, expression style, and progressively disclosed knowledge.
 
-整个系统分为两层：
+This design keeps the existing layered architecture of `brain/`, `memory/`, `projects/`, and the former `self-model/` concept, but renames `self-model/` to `persona/` to avoid the common misunderstanding that this folder defines the model's selfhood. In v1, `persona/` defines the loaded user's role identity.
 
-- 运行时层：`roleMe` skill，负责在对话过程中加载并操作角色包
-- 构建层：当前仓库，负责维护模板、脚本、参考资料以及带版本号的 skill 产物
+The design also preserves progressive disclosure as a first-class architecture principle:
 
-目标使用体验如下：
+- load only the smallest stable role core by default
+- retrieve deeper role knowledge only when the conversation needs it
+- keep memory, topic knowledge, and project overlays discoverable through stepwise lookup rather than full eager injection
 
-- `/roleMe` 默认加载 `self`
-- `/roleMe <角色名>` 加载指定角色
-- 如果角色不存在，skill 通过引导式对话完成初始化
-- 一旦加载完成，当前会话后续都以该角色继续，直到用户明确切换或退出
+This direction is informed by Hermes concepts around persistent memory, context files, and personality separation, while adapting them to a portable user-role bundle model rather than copying Hermes surface structure directly.
 
-## 目标
+References:
 
-- 让角色包以纯文件形式存在，便于分发、检查和编辑
-- 支持直接复制角色目录后即可使用，不依赖原作者环境
-- 将渐进式披露确立为一级架构原则，而不是局部实现技巧
-- 通过渐进式披露控制常驻上下文体积
-- 将稳定身份、记忆、知识和项目叠加层解耦
-- 支持后续 skill 版本化构建和 schema 迁移
-- 让初始化在一次对话中完成一个可用角色的首次定义
+- https://hermes-agent.nousresearch.com/docs/user-guide/features/memory/
+- https://hermes-agent.nousresearch.com/docs/user-guide/features/context-files/
+- https://hermes-agent.nousresearch.com/docs/user-guide/features/personality/
 
-## 非目标
+## Goals
 
-- 不在 v1 中实现宿主级全局人格覆盖
-- 不在 v1 中提供自动删除角色能力
-- 不在 v1 中实现超出文件式索引、摘要和提升之外的完整自治记忆检索系统
-- 不在 v1 中实现角色级云同步
+- Make `/roleMe <role-name>` mean "load the user's role context", not "switch the assistant's persona"
+- Preserve the layered structure of `persona/`, `memory/`, `brain/`, and `projects/`
+- Keep progressive disclosure as the default runtime behavior
+- Support deeper first-time initialization through guided interview instead of shallow template-only setup
+- Allow the assistant to stepwise discover relevant role knowledge during later conversations
+- Keep role bundles portable as plain files under `~/.roleMe/<role-name>/`
+- Support packaging, validation, migration, and export without coupling to a single machine
 
-## 核心概念
+## Non-Goals
 
-### 角色包
+- Do not implement host-wide assistant persona replacement in v1
+- Do not flatten all role identity into `memory/`
+- Do not eagerly inject the full role bundle into every conversation
+- Do not build a full autonomous retrieval engine beyond deterministic file operations and skill-guided lookup in v1
+- Do not introduce destructive role deletion commands in v1
 
-角色包是 `~/.roleMe/<角色名>/` 下的一个目录，包含加载该角色所需的全部文件。
+## Core Mental Model
 
-### 入口文件
+### What `/roleMe` means
 
-`AGENT.md` 是面向大模型的入口文件，它定义：
+`/roleMe <role-name>` loads a user-side role bundle into the current conversation.
 
-- 哪些文件需要常驻加载
-- 哪些文件应按需加载
-- 如何发现并使用项目叠加层
-- 在任务执行中如何路由记忆与知识
+After loading:
 
-### 运行时元数据
+- the assistant should continue acting as an assistant
+- the user should be interpreted as the loaded role
+- the assistant should prefer the loaded role's identity, decision habits, style, and memory when interpreting the user's intent
+- the role bundle should shape understanding first, and wording or naming second
 
-`role.json` 是面向工具和脚本的清单文件，用来定义 schema 与兼容性元数据，便于 skill 和脚本安全地校验、升级和迁移角色包。
+In short:
 
-## 角色包目录结构
+- `roleMe` manages user role context
+- `roleMe` does not manage assistant persona switching
+
+### Why `persona/` exists
+
+`memory/` is not enough on its own.
+
+`memory/` stores durable preferences, facts, summaries, and promoted history. It answers "what should be remembered".
+
+`persona/` stores identity definition, voice, decision tendencies, and disclosure boundaries. It answers "who this role is" and "how this user-role should be interpreted".
+
+This separation is important because:
+
+- identity should remain structured and explicit
+- memory should stay concise and retrieval-friendly
+- not all identity belongs in persistent summary memory
+- merging both into `memory/` would blur stable role definition and accumulated recall
+
+## Role Bundle Structure
 
 ```text
 ~/.roleMe/
   self/
     AGENT.md
     role.json
-    self-model/
-      identity.md
+    persona/
+      narrative.md
       communication-style.md
       decision-rules.md
       disclosure-layers.md
@@ -86,326 +105,352 @@
     ...
 ```
 
-## 加载契约
+## Directory Responsibilities
 
-### 默认解析规则
+### `persona/`
 
-- `/roleMe`
-  - 若 `~/.roleMe/self` 存在，则直接加载
-  - 否则初始化 `self`
-- `/roleMe <角色名>`
-  - 若 `~/.roleMe/<角色名>` 存在，则直接加载
-  - 否则初始化该角色
+This is the role's identity layer.
 
-### 会话激活模型
+It stores:
 
-角色激活是“当前对话级”的：
+- first-person narrative self-description
+- communication tendencies
+- decision rules and tradeoff habits
+- disclosure boundaries and retrieval hints
 
-- skill 读取 `AGENT.md` 和常驻加载文件
-- skill 在当前对话内部生成一份角色激活摘要
-- 后续轮次默认继续沿用该角色，直到用户显式切换或退出
+Recommended files:
 
-这种设计避免了对宿主级全局人格状态的强依赖，同时保留了“加载一次，后续都像本人一样对话”的体验。
+- `persona/narrative.md`
+- `persona/communication-style.md`
+- `persona/decision-rules.md`
+- `persona/disclosure-layers.md`
 
-## 渐进式披露模型
+### `memory/`
 
-### 常驻加载层
+This is the durable recall layer.
 
-角色激活时默认加载并持续生效的文件：
+It stores:
 
-- `self-model/identity.md`
-- `self-model/communication-style.md`
-- `self-model/decision-rules.md`
+- stable preferences
+- long-term facts
+- high-value summaries
+- promoted insights from conversation history
+- episodic records when detail must be preserved before summarization
+
+Recommended files:
+
+- `memory/USER.md`
+- `memory/MEMORY.md`
+- `memory/episodes/*`
+
+### `brain/`
+
+This is the role's topic and knowledge map.
+
+It stores:
+
+- major domains this role thinks about
+- indexes to deeper topic notes
+- knowledge entry points for stepwise retrieval
+
+It should not be a full eager dump. `brain/index.md` is an index, and `brain/topics/*` holds deeper material.
+
+### `projects/`
+
+This is the overlay layer for concrete contexts.
+
+It stores:
+
+- project-specific constraints
+- project-specific memory
+- project-level behavior adjustments
+
+Project overlays should modify the base role, not replace it.
+
+## `AGENT.md` Contract
+
+`AGENT.md` becomes the user-role loading protocol.
+
+It should not tell the model to become the role. It should tell the assistant how to interpret the user after the role is loaded.
+
+At minimum, `AGENT.md` must define:
+
+1. Current role declaration
+   The current user has loaded role `<role-name>`. Interpret the user's intent, style, and decision patterns through this role.
+
+2. Resident context
+   The stable files that should be loaded as the conversation's default role core.
+
+3. On-demand context
+   The deeper files that should only be read when the conversation needs them.
+
+4. Retrieval routing
+   How the assistant should decide whether to consult `memory`, `brain`, `projects`, or episodic details.
+
+5. Memory writeback policy
+   Which newly surfaced information belongs in `USER.md`, `MEMORY.md`, or `episodes/`.
+
+6. Progressive disclosure boundaries
+   Which knowledge should stay latent until triggered by topic, intent, or need.
+
+### Recommended default resident files
+
+- `persona/narrative.md`
+- `persona/communication-style.md`
+- `persona/decision-rules.md`
 - `memory/USER.md`
 - `memory/MEMORY.md`
 
-### 按需加载层
+### Recommended default on-demand paths
 
-仅在任务需要时再读取的文件：
-
+- `persona/disclosure-layers.md`
 - `brain/index.md`
 - `brain/topics/*`
 - `projects/index.md`
 - `projects/<project-name>/*`
 - `memory/episodes/*`
 
-### 披露规则
+## Progressive Disclosure Model
 
-`self-model/disclosure-layers.md` 用来定义哪些信息属于默认层、条件层和深入层，确保角色既可用又不会让上下文膨胀。
+Progressive disclosure is a runtime rule, not only a folder naming convention.
 
-## 初始化流程
+The assistant should not inject everything at once. It should follow a staged lookup model.
 
-当角色目录不存在时，skill 进入 `init` 模式，并通过一轮引导式建模对话完成角色初始化。
+### Stage 1: interpret from the resident role core
 
-### 初始化原则
+For each user turn, first interpret the request from:
 
-- 初始化应在一次对话中产出一个可用角色
-- 初始化结果必须写成结构化文件，而不是单一的大 prompt
-- 用户可以在正式落盘前修订任意一个部分
-- 对话中的中间结果可以暂存，但仅在用户确认后写入角色包
-
-### 初始化阶段
-
-1. 身份定义采集
-2. 沟通风格采集
-3. 决策规则采集
-4. 大脑与知识采集
-5. 记忆种子采集
-6. 角色摘要预览与定向修订
-7. 正式写入角色包
-8. 立即激活该角色
-
-### 初始化输出
-
-首次初始化必须至少产出：
-
-- `AGENT.md`
-- 完整的 `self-model/`
-- `brain/index.md`
+- `persona/narrative.md`
+- `persona/communication-style.md`
+- `persona/decision-rules.md`
 - `memory/USER.md`
 - `memory/MEMORY.md`
-- `projects/index.md`
-- `role.json`
 
-## 记忆设计
+This gives a stable first-pass understanding of who the user-role is.
 
-记忆模型借鉴 Hermes Agent 对“稳定人格、用户记忆、持久摘要”的分层思路，并将其适配为可移植角色包结构。
+### Stage 2: route to the right deeper layer
 
-参考资料：
+If the answer depends on deeper context, the assistant should decide which layer to inspect next:
 
-- https://hermes-agent.nousresearch.com/docs/user-guide/features/memory/
-- https://hermes-agent.nousresearch.com/docs/user-guide/features/context-files/
-- https://hermes-agent.nousresearch.com/docs/user-guide/features/personality/
+- consult `brain/index.md` when the conversation touches a knowledge domain or conceptual area
+- consult `projects/index.md` when the conversation appears project-specific
+- consult `memory/episodes/*` when summary memory is insufficient and event-level detail matters
+- consult `persona/disclosure-layers.md` when the assistant must decide whether deeper personal identity details should be surfaced
 
-### 记忆分层
+### Stage 3: stepwise expansion
 
-#### `memory/USER.md`
+When a domain is identified, the assistant should expand one step at a time rather than load the entire tree.
 
-用于存放稳定偏好和长期约定，例如：
+Example:
 
-- 语言偏好
-- 回答结构偏好
-- 协作规则
-- 重复出现的工作方式偏好
+1. The user asks about a domain-related issue
+2. The assistant checks `brain/index.md`
+3. `brain/index.md` points to a relevant topic note
+4. The assistant reads only that note or the next linked note
+5. If needed, it continues one layer deeper
 
-#### `memory/MEMORY.md`
+This supports the user's intended behavior:
 
-用于存放高价值、压缩后的持久记忆，例如：
+- if a knowledge document is stored in the role's "brain"
+- and the conversation enters that domain
+- the assistant should be able to find it progressively and use it
+- without preloading every knowledge file into the conversation
 
-- 适合跨会话保留的稳定事实
-- 对已学习偏好的简要摘要
-- 记忆主题索引
-- 指向更深层文件的入口
+### Disclosure policy
 
-#### `memory/episodes/`
+The system should prefer:
 
-用于存放默认不常驻加载的情节型或细节型记忆，例如：
+- small stable resident context
+- index-first retrieval
+- topic-triggered deepening
+- project-triggered overlays
+- summary-first memory recall, then episodic fallback
 
-- 会话级笔记
-- 较长的上下文记录
-- 在摘要前保留的详细证据
+The system should avoid:
 
-### v1 记忆操作
+- full eager role injection
+- storing domain knowledge directly in resident memory
+- mixing project overlays into the base identity layer
 
-第一版应支持：
+## Initialization Flow
 
-- 追加新的 episodic memory
-- 将高价值记忆摘要并提升到 `MEMORY.md`
-- 对重复条目进行去重
-- 检索时优先查摘要层，再按需读取情节层
-- 将常驻记忆控制在固定预算内
+If the target role does not exist, `/roleMe` should enter guided initialization mode.
 
-### Hermes 对齐后的核心实现思路
+Initialization should no longer be "create folders immediately and stop". It should first perform a substantial guided interview, then write the role bundle.
 
-这一部分不应简单照搬 Hermes 的文件名或工具表面，而应借鉴它的核心机制：
+### Initialization goals
 
-- 持久记忆应有明确的容量边界
-- 常驻记忆应在会话开始时注入，并采用“冻结快照”策略
-- 记忆写入应立即持久化，但不强制刷新当前会话的常驻 prompt
-- 写入前必须执行安全扫描
-- 记忆系统应区分“总是在 prompt 中的关键记忆”和“按需检索的深层记忆”
+- produce a usable first version of the role in one guided flow
+- collect enough identity depth to support later in-role conversations
+- prioritize first-person narrative identity, not just shallow profile fields
+- convert raw conversation into structured role files
+- keep the user in control before final write
 
-对应到 `roleMe`，第一版建议采用“声明优先 + 极小工具层”的结构。Hermes 值得借鉴的是机制和边界，不是它表面的脚本形态或命令拆分。
+### Initialization stages
 
-### 核心记忆引擎
+1. Narrative identity interview
+   Collect a first-person self-description: who the user is in this role, how they got here, what stage they are in, what they care about, and why they work the way they do.
 
-第一版仍然需要一个统一的记忆执行层，但不建议一开始拆成过多模块。更合适的做法是：
+2. Communication shaping
+   Extract how this role tends to speak, explain, react, and collaborate.
 
-- 将“何时常驻加载、何时渐进加载、何时 recall、何时写记忆”的策略尽量声明在 `AGENT.md`
-- 将“安全写文件、去重、构建冻结快照、摘要优先检索”这类确定性操作收敛到一个轻量工具文件中
+3. Decision modeling
+   Extract how this role makes tradeoffs, what it values, when it becomes cautious, and what defaults it uses when information is incomplete.
 
-这个工具层至少负责：
+4. Knowledge map seeding
+   Identify recurring domains, topic clusters, and likely `brain/` entry points.
 
-- `memory/USER.md` 与 `memory/MEMORY.md` 的读写
-- 去重与唯一匹配替换
-- 容量限制与压缩策略
-- 安全扫描
-- 会话激活时的冻结快照构建
-- `memory/episodes/` 的检索与摘要提升
+5. Durable memory seeding
+   Extract stable preferences, long-term facts, and high-value summaries for `memory/`.
 
-第一版建议的轻量边界如下：
+6. Preview and correction
+   Show a draft role summary before final writing so the user can correct identity drift.
 
-```text
-tools/
-  memory.py
-```
+7. Write role bundle
+   Persist the structured files.
 
-其中 `memory.py` 统一承担：
+8. Activate role
+   Load the newly created role into the current conversation.
 
-- `USER.md`、`MEMORY.md`、`episodes/` 的存取规则
-- prompt injection、不可见字符、角色覆盖型指令等扫描
-- 当前会话注入用冻结记忆块的构建
-- 摘要优先、情节层回退的检索逻辑
-- `recall`、`write`、`summarize_and_write`、`promote`、`compact` 等统一入口
+### Initialization output mapping
 
-### 可选入口层
+Interview output should map to files like this:
 
-在核心记忆工具之上，可以按需提供少量独立入口，但它们不是架构中心。它们只在以下场景下才有必要存在：
+- narrative self-description -> `persona/narrative.md`
+- communication habits -> `persona/communication-style.md`
+- decision tendencies -> `persona/decision-rules.md`
+- disclosure boundaries -> `persona/disclosure-layers.md`
+- stable preferences and facts -> `memory/USER.md`
+- high-value summaries and indexes -> `memory/MEMORY.md`
+- domain map -> `brain/index.md`
+- concrete topic files -> `brain/topics/*` only when enough detail exists
+- project-specific material -> `projects/` only when clearly scoped
 
-- skill 运行时需要通过确定性工具触发文件操作
-- 构建、校验、测试需要命令行入口
-- 某些操作适合被单独复用
+### Initialization writing principles
 
-如果没有这些需求，功能应直接落在 `tools/memory.py` 中，由 skill 运行时按需调用，而不是人为拆成一组更细的脚本。
+- `persona/` can preserve a human, first-person feel
+- `memory/` should stay compressed and retrieval-friendly
+- `brain/` should favor indexes over bulk content
+- `projects/` should not be invented unless the interview clearly identifies them
 
-若确实需要命令行入口，建议仅保留少量薄封装，例如：
+## Memory Design
 
-- `scripts/memory/append_memory.py`
-  - 向 `memory/episodes/` 追加一条新的情节型记忆
-- `scripts/memory/retrieve_memory.py`
-  - 优先读取 `MEMORY.md`，不足时回退到 `memory/episodes/`
-- `scripts/memory/summarize_memory.py`
-  - 将 episodic memory 压缩成候选摘要
-- `scripts/memory/promote_memory.py`
-  - 将高价值候选摘要提升到 `MEMORY.md`
-- `scripts/memory/compact_memory.py`
-  - 控制 `MEMORY.md` 和 `USER.md` 的体积
-- `scripts/memory/validate_memory.py`
-  - 校验 `memory/` 目录结构与内容
+The memory layer adapts the Hermes-style separation between stable user memory and retrievable historical detail to a portable role bundle.
 
-这些入口只是 `roleMe` 自己的工程化选择，不是 Hermes 仓库中的现成脚本列表，也不是第一版必须全部存在的交付物。第一版完全可以只保留一个 `tools/memory.py`，而不额外拆出 `scripts/memory/`。
+### `memory/USER.md`
 
-### 冻结快照规则
+Stores:
 
-为了贴近 Hermes 的可预测行为，`roleMe` 的常驻记忆加载规则应明确为：
+- stable preferences
+- long-term agreements
+- persistent facts about the user-role
+- collaboration defaults
 
-- 角色激活时读取 `USER.md` 与 `MEMORY.md`
-- 生成当前会话使用的“冻结快照”
-- 本会话中新增或修改的记忆应立即持久化到角色目录
-- 但默认不自动刷新当前会话的常驻记忆块
-- 若用户显式执行重新加载或切换角色，则重新构建快照
+### `memory/MEMORY.md`
 
-这个规则可以降低提示词漂移，保证会话中的角色行为更加稳定。
+Stores:
 
-### 记忆触发模型
+- high-value compressed summaries
+- durable conclusions worth reusing
+- indexes into deeper memories
+- promoted insights from repeated interaction
 
-角色加载后，记忆处理应以“策略自动触发为主，自然语言显式触发为辅”。
+### `memory/episodes/`
 
-#### 自动触发
+Stores:
 
-`AGENT.md` 应定义清晰的记忆策略，让模型在满足条件时自动触发记忆动作。典型场景包括：
+- conversation-level detail
+- event records
+- evidence preserved before summarization
+- details too large or too transient for resident memory
 
-- 用户给出稳定偏好、长期约定或持久事实
-- 用户纠正角色行为，且该纠正未来仍然重要
-- 回答问题前需要先回忆历史偏好、历史结论或角色相关上下文
-- 记忆接近预算上限，需要压缩或整理
-- 角色切换、重新加载、会话结束时，需要沉淀高价值信息
+### Frozen snapshot rule
 
-#### 自然语言显式触发
+At role activation time:
 
-用户不必学习专门命令，也可以直接通过自然语言要求模型处理记忆。例如：
+- read `USER.md` and `MEMORY.md`
+- build a frozen resident snapshot for the current conversation
+- persist new memory writes immediately to disk
+- do not automatically rebuild the resident snapshot mid-conversation unless the role is explicitly reloaded
 
-- “帮我记住这个偏好”
-- “把这个项目约定记下来”
-- “先回忆一下我们之前怎么定的”
-- “帮我总结过后写入记忆”
+This preserves predictability and avoids prompt drift.
 
-这类自然语言请求应优先于自动判断，并直接驱动记忆引擎执行对应动作。
+## Knowledge and Retrieval Design
 
-#### 第一版必须支持的标准动作
-
-第一版建议在核心记忆引擎中统一支持以下动作语义：
-
-- `recall`
-  - 读取角色已有记忆，优先摘要层，再按需读取深层记忆
-- `write`
-  - 直接写入稳定记忆或情节记忆
-- `summarize_and_write`
-  - 先从当前对话或指定内容中提取关键信息
-  - 再压缩成适合长期保存的形式
-  - 最后写入对应记忆层
-- `promote`
-  - 将高价值 episodic memory 提升到 `MEMORY.md`
-- `compact`
-  - 当记忆超过预算或结构失衡时，执行压缩与整理
-
-其中，`summarize_and_write` 应作为第一版必须支持的核心显式触发能力，因为它最符合真实使用场景，也最适合作为“帮我总结后写入记忆”这类用户表达的底层实现。
-
-### 记忆安全
-
-由于常驻记忆会直接进入后续提示词，在将内容提升到常驻文件前，系统应执行基础的 prompt injection 与指令冲突扫描。
-
-## 知识设计
-
-`brain/` 是角色的知识储备层。
+`brain/` exists so the role can own knowledge without forcing that knowledge into the resident prompt.
 
 ### `brain/index.md`
 
-这个文件是索引，不是知识堆积区。它应当：
+This file should:
 
-- 概括主要知识领域
-- 链接到主题文件或外部参考资料
-- 帮助 skill 判断是否需要继续加载更深层资料
+- list the role's major knowledge domains
+- map domains to specific topic files
+- help the assistant decide whether it should go deeper
 
-### 主题文件
+### `brain/topics/*`
 
-详细知识应放在 `brain/topics/` 中，或以引用文档的形式存在。角色包需要同时支持本地文件和受控外链。
+These files should hold:
 
-## 项目叠加层设计
+- domain notes
+- methods
+- frameworks
+- references
+- linked knowledge documents
 
-`projects/` 让同一个角色在不同工作上下文中具备不同表现，而不改变其基础身份。
+The skill should support both local content and referenced documents, as long as retrieval remains controlled and stepwise.
 
-每个项目叠加层可以包含：
+## Project Overlay Design
 
-- `overlay.md`：项目特定的角色规则调整
-- `context.md`：项目事实与约束
-- `memory.md`：项目特定记忆
+`projects/` allows the same role to behave differently across concrete working contexts without changing the base identity.
 
-项目叠加层会调整基础角色，但不会替换基础角色。
+Each project overlay can include:
 
-## 命令面
+- `overlay.md` for project-specific behavioral adjustments
+- `context.md` for constraints and facts
+- `memory.md` for project-level durable memory
 
-运行时 skill 的第一版应支持以下命令：
+The assistant should consult `projects/index.md` first and only read a project directory when the current conversation clearly points there.
+
+## Commands
+
+The v1 runtime skill should support:
 
 - `/roleMe`
-- `/roleMe <角色名>`
+- `/roleMe <role-name>`
 - `/roleMe list`
 - `/roleMe current`
-- `/roleMe optimize [角色名]`
-- `/roleMe export [角色名]`
-- `/roleMe doctor [角色名]`
+- `/roleMe optimize [role-name]`
+- `/roleMe export [role-name]`
+- `/roleMe doctor [role-name]`
 
-### 范围说明
+### Command semantics
 
-- 为降低误操作风险，v1 故意不提供删除能力
-- `optimize` 主要负责记忆压缩、索引清理和 prompt 预算卫生
-- `doctor` 主要负责 schema 校验、缺失文件检查和迁移建议
+- `/roleMe`
+  - load `self` if it exists
+  - otherwise initialize `self`
 
-## 版本与兼容性
+- `/roleMe <role-name>`
+  - load the named role if it exists
+  - otherwise initialize it
 
-需要明确区分三个版本概念：
+- `/roleMe current`
+  - report which user-role is currently active in the conversation
 
-- `skillVersion`：`roleMe` skill 自身的版本
-- `schemaVersion`：角色包结构契约的版本
-- `roleVersion`：某个具体角色内容的版本
+- `/roleMe optimize`
+  - focus on memory compaction, cleanup, and role bundle hygiene
 
-### `role.json`
+- `/roleMe doctor`
+  - validate required files, schema compatibility, and structural health
 
-每个角色包都必须包含一个类似如下的机器可读清单：
+## Manifest and Compatibility
+
+Each role bundle must include `role.json`.
+
+Example:
 
 ```json
 {
-  "roleName": "赵超",
+  "roleName": "self",
   "schemaVersion": "1.0",
   "roleVersion": "0.1.0",
   "createdBySkillVersion": "0.1.0",
@@ -416,185 +461,57 @@ tools/
 }
 ```
 
-### 兼容性规则
+Compatibility rules:
 
-- 兼容的 schema 版本应可直接加载
-- 较旧 schema 版本应在可能时由工具自动迁移
-- 面对不兼容的未来 schema 版本时，应安全失败并给出明确提示
+- compatible schemas should load directly
+- older schemas may be upgraded by tools when possible
+- incompatible future schemas should fail safely with a clear message
 
-## 仓库职责
+## Repository Responsibilities
 
-当前仓库是系统源码仓库，不是用户长期角色数据的默认存放位置。
+This repository is the source repository for the skill system, not the long-term storage location for user role data.
 
-它应该负责：
+It should own:
 
-- 模板
-- skill 源码
-- 记忆脚本与其他运行时脚本
-- 校验与迁移脚本
-- 参考资料与示例
-- 构建产物
+- templates
+- runtime tools
+- packaging scripts
+- validation and upgrade scripts
+- tests
+- references
+- published skill artifacts
 
-它不应该默认承担个人角色数据仓库的职责。
+The user's real role bundles live under `~/.roleMe/`.
 
-### 建议源码布局
+## Template Changes Required
 
-为了让“仓库开发”和“skill 打包”之间的边界清晰，建议源码层采用类似下面的组织方式：
+To support this design, templates should be updated as follows:
 
-```text
-tools/
-  role_ops.py
-  memory.py
-templates/
-scripts/
-  build_skill.py
-  validate_role.py
-  upgrade_role.py
-skill/
-  SKILL.md
-  references/
-  agents/
-```
+- rename `templates/self-model/` to `templates/persona/`
+- update `templates/AGENT.md` to describe user-role interpretation rather than assistant-role performance
+- update resident and on-demand file lists to use `persona/*`
+- update disclosure instructions to include retrieval routing
+- keep `MEMORY.md` and `USER.md` as structured marker-block files for safe edits
+- keep project templates explicitly on-demand
 
-其中：
+## Success Criteria
 
-- `tools/` 负责最终 skill 运行时真正需要的轻量工具代码
-- `templates/` 负责角色初始化时生成的目录与文档模板
-- `scripts/` 只放开发仓库内部使用的构建、校验、升级脚本
-- 若未来确实需要更多命令行入口，优先先评估是否直接写进 `tools/` 即可，不必先增加新脚本目录
-- `scripts/build_skill.py` 负责把模板、运行时工具、references 和 skill 定义复制到打包目录
-- `skill/` 负责最终 skill 的源定义，而不是用户角色数据
+The design is successful when:
 
-### 模板需要同步改造的部分
+- `/roleMe <role-name>` clearly means the user becomes that role in the conversation
+- the assistant still behaves as an assistant
+- the role bundle structure preserves `persona`, `memory`, `brain`, and `projects`
+- initialization produces a deeper and more convincing role foundation
+- later conversations can retrieve relevant domain knowledge progressively from `brain/`
+- resident context remains small and stable
+- deeper knowledge stays discoverable without full eager injection
+- role bundles remain portable and packageable
 
-为了让模板真正适配 Hermes 风格的记忆机制，第一版应同步改造以下模板：
+## Confirmed Decisions
 
-- `templates/AGENT.md`
-  - 增加“常驻记忆快照在角色激活时生成”的说明
-  - 明确本会话写入记忆后默认不会自动刷新常驻块，除非重新加载
-- `templates/memory/MEMORY.md`
-  - 从纯说明性模板改为“说明区 + 机器可维护条目区”
-  - 保留人类可读性，同时为脚本提供稳定编辑边界
-- `templates/memory/USER.md`
-  - 同样改为“说明区 + 机器可维护条目区”
-  - 适合保存稳定偏好、长期约定和持久事实
-- `templates/projects/index.md`
-  - 明确项目层是按需加载，不应与基础人格层混写
-- `templates/self-model/disclosure-layers.md`
-  - 明确常驻层、按需层、深层的加载边界，与冻结快照规则保持一致
-
-推荐 `MEMORY.md` 和 `USER.md` 都采用稳定标记块，便于脚本安全更新，例如：
-
-```markdown
-# 记忆索引
-
-[说明性文字]
-
-<!-- ROLEME:ENTRIES:START -->
-- 条目 A
-- 条目 B
-<!-- ROLEME:ENTRIES:END -->
-```
-
-这样既保留了 Markdown 的可读性，也避免脚本在自由文本中做脆弱替换。
-
-## Skill 产物布局
-
-最终构建出的产物应当是可分发、带版本号的 skill 目录。第一版建议区分“最小必需产物”和“按需附带产物”。
-
-最小必需产物例如：
-
-```text
-dist/roleme-v0.1.0/
-  SKILL.md
-  agents/openai.yaml
-  tools/
-    role_ops.py
-    memory.py
-  assets/templates/
-```
-
-按需附带的产物例如：
-
-```text
-dist/roleme-v0.1.0/
-  references/
-```
-
-其中：
-
-- `references/` 只在 `SKILL.md` 明确依赖辅助说明、schema 说明或外部资料摘要时才进入最终产物
-- `scripts/build_skill.py` 是仓库内的开发期出包脚本，不进入最终 skill 产物
-- `scripts/validate_role.py` 和 `scripts/upgrade_role.py` 保留在开发仓库中，用于开发期校验和迁移，不进入最终 skill 产物
-
-建议第一批构建脚本包括：
-
-- `scripts/build_skill.py`
-- `scripts/validate_role.py`
-- `scripts/upgrade_role.py`
-
-### 打包规则
-
-是的，运行时脚本应当在此仓库中创建，然后在构建 skill 时复制“确实需要随 skill 分发的那一部分”，而不是在导出阶段临时拼接。
-
-建议 `build_skill.py` 承担以下职责：
-
-- 从仓库内的 `skill/` 复制 `SKILL.md`、`agents/openai.yaml`
-- 若 `SKILL.md` 或运行时约定确实依赖辅助资料，再复制 `references/`
-- 从仓库内的 `templates/` 复制角色模板到产物的 `assets/templates/`
-- 从仓库内的 `tools/` 复制最终 skill 真正需要的轻量运行时工具到产物的 `tools/`
-- `scripts/build_skill.py` 自身保留在源码仓库中，不复制进最终产物
-- 写入 skill 版本号并生成最终 `dist/roleme-vX.Y.Z/`
-- 对产物执行一次基础校验，确保关键文件完整
-
-这意味着：
-
-- 角色初始化、记忆处理、校验升级都以源码形式维护在当前仓库
-- 核心逻辑应优先沉淀在 `tools/`，而不是分散在开发脚本里
-- skill 打包只是“复制与封装”，不是重新生成逻辑
-- 后续如果升级记忆策略，只需要更新仓库里的核心模块并重新 build skill
-- 最终产物不应包含测试文件、仓库文档、Git 元数据和其他仅开发期使用的配置
-
-## 安全性与可移植性
-
-### 可移植性
-
-- 复制得到的角色目录只要 `schemaVersion` 兼容，就应可直接使用
-- 核心文件应避免写入机器相关的绝对路径
-- 可以允许外部链接存在，但角色在没有这些链接的情况下仍应保持基本可用
-
-### 安全性
-
-- 角色加载时应将角色文件视作“用户信任来源”，但仍要做结构校验
-- 记忆提升为常驻内容前应扫描指令冲突型文本
-- 导出时默认只包含角色本地数据，除非用户明确要求附带额外资源
-
-## 成功标准
-
-当满足以下条件时，设计可视为成功：
-
-- 缺失的 `self` 角色可以通过对话初始化并立即使用
-- 复制来的角色包可以直接放入 `~/.roleMe/` 并加载，无需手工修改
-- 激活后，角色在当前对话中保持稳定
-- 常驻加载文件始终保持小而聚焦
-- 记忆可以持续增长，而不会把 `AGENT.md` 变成巨型单文件
-- 当前仓库可以构建出带版本号的 skill 产物，并支撑后续迁移
-
-## 实现方向
-
-推荐的实现顺序：
-
-1. 最终确定角色包 schema 与 manifest
-2. 实现运行时加载与初始化流程
-3. 实现基于模板的文件生成
-4. 实现 memory optimize 与 doctor 流程
-5. 实现 build、validate、upgrade 脚本
-6. 增加 export 与兼容性测试
-
-## 本文档已确认的关键决策
-
-- 初始化由对话驱动，并在一次流程中完成角色首次定义
-- 不带参数的默认命令解析为 `self`
-- 角色数据存放在 `~/.roleMe/`，而不是当前仓库
-- 第一版采用渐进式披露，而不是一次性全量加载
-- 记忆采用“摘要层 + 情节层”的分层结构，而不是单一平铺文件
+- `roleMe` manages user-side role context, not assistant persona switching
+- the current `self-model/` concept stays, but is renamed to `persona/`
+- `memory/` does not replace `persona/`
+- progressive disclosure remains a core architecture rule
+- the assistant should be able to stepwise discover knowledge from `brain/` during later conversations
+- initialization should use a deeper guided interview, with strong emphasis on first-person narrative identity
