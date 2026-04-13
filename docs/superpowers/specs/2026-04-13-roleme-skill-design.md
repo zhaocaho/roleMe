@@ -1,60 +1,60 @@
-# roleMe Skill Design
+# roleMe Skill 设计文档
 
-Date: 2026-04-13
-Status: Approved for planning
+日期：2026-04-13
+状态：已确认，待进入规划
 
-## Summary
+## 概述
 
-`roleMe` is a reusable role system that lets a user initialize, load, switch, optimize, and export a "digital twin" role package. Each role lives under `~/.roleMe/<role-name>/` and can be copied between machines or users as a portable folder.
+`roleMe` 是一个可复用的角色系统，用来初始化、加载、切换、优化和导出“数字分身”角色包。每个角色都存放在 `~/.roleMe/<角色名>/` 下，并且可以作为一个可移植目录，在不同机器或不同用户之间直接复制使用。
 
-The system has two layers:
+整个系统分为两层：
 
-- Runtime layer: a `roleMe` skill that loads and operates on role packages during conversation
-- Build layer: this repository, which owns templates, scripts, references, and the versioned skill artifact
+- 运行时层：`roleMe` skill，负责在对话过程中加载并操作角色包
+- 构建层：当前仓库，负责维护模板、脚本、参考资料以及带版本号的 skill 产物
 
-The target experience is:
+目标使用体验如下：
 
-- `/roleMe` loads `self` by default
-- `/roleMe <role-name>` loads a named role
-- If the role does not exist, the skill initializes it through a guided conversation
-- Once loaded, the current session continues in that role until the user explicitly switches or exits
+- `/roleMe` 默认加载 `self`
+- `/roleMe <角色名>` 加载指定角色
+- 如果角色不存在，skill 通过引导式对话完成初始化
+- 一旦加载完成，当前会话后续都以该角色继续，直到用户明确切换或退出
 
-## Goals
+## 目标
 
-- Make a role package portable, inspectable, and editable as plain files
-- Support direct use of copied role folders without requiring the original author environment
-- Keep always-loaded context small through progressive disclosure
-- Separate stable identity, memory, knowledge, and project overlays
-- Support future versioned skill builds and schema migrations
-- Make initialization complete enough to produce a usable first version of a role in one conversation
+- 让角色包以纯文件形式存在，便于分发、检查和编辑
+- 支持直接复制角色目录后即可使用，不依赖原作者环境
+- 通过渐进式披露控制常驻上下文体积
+- 将稳定身份、记忆、知识和项目叠加层解耦
+- 支持后续 skill 版本化构建和 schema 迁移
+- 让初始化在一次对话中完成一个可用角色的首次定义
 
-## Non-Goals
+## 非目标
 
-- Global host-level persona override outside the current conversation
-- Automatic deletion of roles in v1
-- Full autonomous memory retrieval stack in v1 beyond file-based indexing, summarization, and promotion
-- Role-specific cloud sync in v1
+- 不在 v1 中实现宿主级全局人格覆盖
+- 不在 v1 中提供自动删除角色能力
+- 不在 v1 中实现超出文件式索引、摘要和提升之外的完整自治记忆检索系统
+- 不在 v1 中实现角色级云同步
 
-## Core Concepts
+## 核心概念
 
-### Role Package
+### 角色包
 
-A role package is a folder under `~/.roleMe/<role-name>/` that contains all files needed to load that role.
+角色包是 `~/.roleMe/<角色名>/` 下的一个目录，包含加载该角色所需的全部文件。
 
-### Entry File
+### 入口文件
 
-`AGENT.md` is the LLM-facing entry point. It defines:
+`AGENT.md` 是面向大模型的入口文件，它定义：
 
-- which files are always loaded
-- which files are loaded on demand
-- how project overlays are discovered
-- how memory and knowledge should be routed during a task
+- 哪些文件需要常驻加载
+- 哪些文件应按需加载
+- 如何发现并使用项目叠加层
+- 在任务执行中如何路由记忆与知识
 
-### Runtime Metadata
+### 运行时元数据
 
-`role.json` is the tool-facing manifest. It defines schema and compatibility metadata so scripts and the skill can validate and migrate role packages safely.
+`role.json` 是面向工具和脚本的清单文件，用来定义 schema 与兼容性元数据，便于 skill 和脚本安全地校验、升级和迁移角色包。
 
-## Role Package Structure
+## 角色包目录结构
 
 ```text
 ~/.roleMe/
@@ -83,32 +83,32 @@ A role package is a folder under `~/.roleMe/<role-name>/` that contains all file
     ...
 ```
 
-## Loading Contract
+## 加载契约
 
-### Default Resolution
+### 默认解析规则
 
-- `/roleMe`:
-  - load `~/.roleMe/self` when it exists
-  - otherwise initialize `self`
-- `/roleMe <role-name>`:
-  - load `~/.roleMe/<role-name>` when it exists
-  - otherwise initialize that role
+- `/roleMe`
+  - 若 `~/.roleMe/self` 存在，则直接加载
+  - 否则初始化 `self`
+- `/roleMe <角色名>`
+  - 若 `~/.roleMe/<角色名>` 存在，则直接加载
+  - 否则初始化该角色
 
-### Session Activation
+### 会话激活模型
 
-Role activation is conversation-scoped:
+角色激活是“当前对话级”的：
 
-- the skill reads `AGENT.md` and the always-loaded files
-- it emits an internal role activation summary for the current conversation
-- future turns continue in that role until the user switches or exits
+- skill 读取 `AGENT.md` 和常驻加载文件
+- skill 在当前对话内部生成一份角色激活摘要
+- 后续轮次默认继续沿用该角色，直到用户显式切换或退出
 
-This design avoids hard dependency on host-global persona state while preserving the desired "load once, talk as that person" experience.
+这种设计避免了对宿主级全局人格状态的强依赖，同时保留了“加载一次，后续都像本人一样对话”的体验。
 
-## Progressive Disclosure Model
+## 渐进式披露模型
 
-### Always-Loaded Layer
+### 常驻加载层
 
-These files are loaded during activation and remain the stable base:
+角色激活时默认加载并持续生效的文件：
 
 - `self-model/identity.md`
 - `self-model/communication-style.md`
@@ -116,9 +116,9 @@ These files are loaded during activation and remain the stable base:
 - `memory/USER.md`
 - `memory/MEMORY.md`
 
-### On-Demand Layer
+### 按需加载层
 
-These files are loaded only when the task needs them:
+仅在任务需要时再读取的文件：
 
 - `brain/index.md`
 - `brain/topics/*`
@@ -126,153 +126,153 @@ These files are loaded only when the task needs them:
 - `projects/<project-name>/*`
 - `memory/episodes/*`
 
-### Disclosure Rules
+### 披露规则
 
-`self-model/disclosure-layers.md` defines what belongs in the default layer, conditional layer, and deep layer so the role remains usable without overloading context.
+`self-model/disclosure-layers.md` 用来定义哪些信息属于默认层、条件层和深入层，确保角色既可用又不会让上下文膨胀。
 
-## Initialization Flow
+## 初始化流程
 
-When a role folder does not exist, the skill enters `init` mode and completes a guided modeling conversation.
+当角色目录不存在时，skill 进入 `init` 模式，并通过一轮引导式建模对话完成角色初始化。
 
-### Initialization Principles
+### 初始化原则
 
-- initialization should create a usable role in one conversation
-- initialization should still write structured files, not a single large prompt
-- the user can refine any section before the files are finalized
-- partial progress should be staged in memory during the conversation and written only after confirmation
+- 初始化应在一次对话中产出一个可用角色
+- 初始化结果必须写成结构化文件，而不是单一的大 prompt
+- 用户可以在正式落盘前修订任意一个部分
+- 对话中的中间结果可以暂存，但仅在用户确认后写入角色包
 
-### Initialization Stages
+### 初始化阶段
 
-1. Identity capture
-2. Communication style capture
-3. Decision rules capture
-4. Brain and knowledge capture
-5. Memory seed capture
-6. Summary preview and targeted revision
-7. Final write to role package
-8. Immediate activation
+1. 身份定义采集
+2. 沟通风格采集
+3. 决策规则采集
+4. 大脑与知识采集
+5. 记忆种子采集
+6. 角色摘要预览与定向修订
+7. 正式写入角色包
+8. 立即激活该角色
 
-### Initialization Outputs
+### 初始化输出
 
-The first initialization must produce:
+首次初始化必须至少产出：
 
 - `AGENT.md`
-- full `self-model/`
+- 完整的 `self-model/`
 - `brain/index.md`
 - `memory/USER.md`
 - `memory/MEMORY.md`
 - `projects/index.md`
 - `role.json`
 
-## Memory Design
+## 记忆设计
 
-The memory model is inspired by Hermes Agent's split between stable personality, user memory, and persistent summaries, while adapting it to a portable role package layout.
+记忆模型借鉴 Hermes Agent 对“稳定人格、用户记忆、持久摘要”的分层思路，并将其适配为可移植角色包结构。
 
-Reference materials:
+参考资料：
 
 - https://hermes-agent.nousresearch.com/docs/user-guide/features/memory/
 - https://hermes-agent.nousresearch.com/docs/user-guide/features/context-files/
 - https://hermes-agent.nousresearch.com/docs/user-guide/features/personality/
 
-### Memory Layers
+### 记忆分层
 
 #### `memory/USER.md`
 
-Stores stable preferences and long-term agreements such as:
+用于存放稳定偏好和长期约定，例如：
 
-- language preference
-- response structure preference
-- collaboration rules
-- repeated workflow preferences
+- 语言偏好
+- 回答结构偏好
+- 协作规则
+- 重复出现的工作方式偏好
 
 #### `memory/MEMORY.md`
 
-Stores compressed, high-value persistent memory such as:
+用于存放高价值、压缩后的持久记忆，例如：
 
-- stable facts worth carrying across sessions
-- concise summaries of learned preferences
-- memory topic index
-- pointers to deeper files
+- 适合跨会话保留的稳定事实
+- 对已学习偏好的简要摘要
+- 记忆主题索引
+- 指向更深层文件的入口
 
 #### `memory/episodes/`
 
-Stores episodic or detailed records that are not always loaded:
+用于存放默认不常驻加载的情节型或细节型记忆，例如：
 
-- session-specific notes
-- longer contextual records
-- detailed evidence before summarization
+- 会话级笔记
+- 较长的上下文记录
+- 在摘要前保留的详细证据
 
-### v1 Memory Operations
+### v1 记忆操作
 
-The first version should support:
+第一版应支持：
 
-- append new episodic memory
-- summarize and promote high-value memory into `MEMORY.md`
-- deduplicate repeated entries
-- retrieve from summary first, then episodic files when needed
-- keep always-loaded memory within a bounded size budget
+- 追加新的 episodic memory
+- 将高价值记忆摘要并提升到 `MEMORY.md`
+- 对重复条目进行去重
+- 检索时优先查摘要层，再按需读取情节层
+- 将常驻记忆控制在固定预算内
 
-### Memory Safety
+### 记忆安全
 
-Before promoting content into always-loaded files, the system should perform a basic prompt-injection and instruction-conflict scan, because these files directly affect future role behavior.
+由于常驻记忆会直接进入后续提示词，在将内容提升到常驻文件前，系统应执行基础的 prompt injection 与指令冲突扫描。
 
-## Knowledge Design
+## 知识设计
 
-`brain/` is the role's knowledge reserve.
+`brain/` 是角色的知识储备层。
 
 ### `brain/index.md`
 
-This file is an index, not a knowledge dump. It should:
+这个文件是索引，不是知识堆积区。它应当：
 
-- summarize major knowledge domains
-- link to topic files or external references
-- help the skill decide what deeper material to load
+- 概括主要知识领域
+- 链接到主题文件或外部参考资料
+- 帮助 skill 判断是否需要继续加载更深层资料
 
-### Topic Files
+### 主题文件
 
-Detailed knowledge should live under `brain/topics/` or as referenced documents. The package must support both local files and curated links.
+详细知识应放在 `brain/topics/` 中，或以引用文档的形式存在。角色包需要同时支持本地文件和受控外链。
 
-## Project Overlay Design
+## 项目叠加层设计
 
-`projects/` lets one role adapt to different working contexts without changing the base identity.
+`projects/` 让同一个角色在不同工作上下文中具备不同表现，而不改变其基础身份。
 
-Each project overlay may contain:
+每个项目叠加层可以包含：
 
-- `overlay.md`: project-specific role adjustments
-- `context.md`: project facts and constraints
-- `memory.md`: project-specific memory
+- `overlay.md`：项目特定的角色规则调整
+- `context.md`：项目事实与约束
+- `memory.md`：项目特定记忆
 
-Overlays adjust the base role but do not replace it.
+项目叠加层会调整基础角色，但不会替换基础角色。
 
-## Command Surface
+## 命令面
 
-The runtime skill should support the following first-version commands:
+运行时 skill 的第一版应支持以下命令：
 
 - `/roleMe`
-- `/roleMe <role-name>`
+- `/roleMe <角色名>`
 - `/roleMe list`
 - `/roleMe current`
-- `/roleMe optimize [role-name]`
-- `/roleMe export [role-name]`
-- `/roleMe doctor [role-name]`
+- `/roleMe optimize [角色名]`
+- `/roleMe export [角色名]`
+- `/roleMe doctor [角色名]`
 
-### Scope Notes
+### 范围说明
 
-- Delete is intentionally excluded from v1 to reduce accidental destructive actions
-- `optimize` focuses on memory compression, index cleanup, and prompt budget hygiene
-- `doctor` focuses on schema validation, missing files, and migration guidance
+- 为降低误操作风险，v1 故意不提供删除能力
+- `optimize` 主要负责记忆压缩、索引清理和 prompt 预算卫生
+- `doctor` 主要负责 schema 校验、缺失文件检查和迁移建议
 
-## Versioning and Compatibility
+## 版本与兼容性
 
-Three version concepts must remain separate:
+需要明确区分三个版本概念：
 
-- `skillVersion`: version of the `roleMe` skill itself
-- `schemaVersion`: version of the role package contract
-- `roleVersion`: version of a specific role's content
+- `skillVersion`：`roleMe` skill 自身的版本
+- `schemaVersion`：角色包结构契约的版本
+- `roleVersion`：某个具体角色内容的版本
 
 ### `role.json`
 
-Each role package must contain a machine-readable manifest similar to:
+每个角色包都必须包含一个类似如下的机器可读清单：
 
 ```json
 {
@@ -287,29 +287,29 @@ Each role package must contain a machine-readable manifest similar to:
 }
 ```
 
-### Compatibility Rules
+### 兼容性规则
 
-- compatible schema versions should load directly
-- older schema versions should be migrated by tooling when possible
-- incompatible future schema versions should fail safely with guidance
+- 兼容的 schema 版本应可直接加载
+- 较旧 schema 版本应在可能时由工具自动迁移
+- 面对不兼容的未来 schema 版本时，应安全失败并给出明确提示
 
-## Repository Responsibilities
+## 仓库职责
 
-This repository is the source for the system, not the long-term store for user roles.
+当前仓库是系统源码仓库，不是用户长期角色数据的默认存放位置。
 
-It should own:
+它应该负责：
 
-- templates
-- the skill source
-- validation and migration scripts
-- references and examples
-- build outputs
+- 模板
+- skill 源码
+- 校验与迁移脚本
+- 参考资料与示例
+- 构建产物
 
-It should not be the default storage location for personal role data.
+它不应该默认承担个人角色数据仓库的职责。
 
-## Skill Artifact Layout
+## Skill 产物布局
 
-The built artifact should be versioned and distributable, for example:
+最终构建出的产物应当是可分发、带版本号的 skill 目录，例如：
 
 ```text
 dist/roleme-v0.1.0/
@@ -320,52 +320,52 @@ dist/roleme-v0.1.0/
   assets/templates/
 ```
 
-Suggested first build scripts:
+建议第一批构建脚本包括：
 
 - `scripts/build_skill.py`
 - `scripts/validate_role.py`
 - `scripts/upgrade_role.py`
 
-## Security and Portability
+## 安全性与可移植性
 
-### Portability
+### 可移植性
 
-- a copied role folder should be directly usable if `schemaVersion` is compatible
-- the package should avoid machine-specific absolute paths in core files
-- external links are allowed, but the role should remain usable without them
+- 复制得到的角色目录只要 `schemaVersion` 兼容，就应可直接使用
+- 核心文件应避免写入机器相关的绝对路径
+- 可以允许外部链接存在，但角色在没有这些链接的情况下仍应保持基本可用
 
-### Safety
+### 安全性
 
-- role loading should treat package files as trusted-by-user but still validate structure
-- memory promotion should scan for instruction-conflicting content
-- export should only include role-local data unless the user explicitly chooses extra assets
+- 角色加载时应将角色文件视作“用户信任来源”，但仍要做结构校验
+- 记忆提升为常驻内容前应扫描指令冲突型文本
+- 导出时默认只包含角色本地数据，除非用户明确要求附带额外资源
 
-## Success Criteria
+## 成功标准
 
-The design succeeds when:
+当满足以下条件时，设计可视为成功：
 
-- a missing `self` role can be initialized from conversation and used immediately
-- a copied role package can be dropped into `~/.roleMe/` and loaded without manual edits
-- activation keeps the role stable across the current conversation
-- always-loaded files remain small and focused
-- memory can grow without turning `AGENT.md` into a monolith
-- the repository can build a versioned skill artifact and support future migrations
+- 缺失的 `self` 角色可以通过对话初始化并立即使用
+- 复制来的角色包可以直接放入 `~/.roleMe/` 并加载，无需手工修改
+- 激活后，角色在当前对话中保持稳定
+- 常驻加载文件始终保持小而聚焦
+- 记忆可以持续增长，而不会把 `AGENT.md` 变成巨型单文件
+- 当前仓库可以构建出带版本号的 skill 产物，并支撑后续迁移
 
-## Implementation Direction
+## 实现方向
 
-Recommended implementation order:
+推荐的实现顺序：
 
-1. Finalize role package schema and manifest
-2. Implement the runtime loading and initialization flow
-3. Implement file generation from templates
-4. Implement memory optimize and doctor flows
-5. Implement build, validate, and upgrade scripts
-6. Add export and compatibility tests
+1. 最终确定角色包 schema 与 manifest
+2. 实现运行时加载与初始化流程
+3. 实现基于模板的文件生成
+4. 实现 memory optimize 与 doctor 流程
+5. 实现 build、validate、upgrade 脚本
+6. 增加 export 与兼容性测试
 
-## Open Decisions Resolved In This Spec
+## 本文档已确认的关键决策
 
-- Initialization is conversation-driven and should complete the first role definition in one pass
-- The default unnamed command resolves to `self`
-- Role data lives under `~/.roleMe/`, not this repository
-- The first version supports progressive disclosure instead of full eager loading
-- Memory uses summary plus episodic layers instead of one flat file
+- 初始化由对话驱动，并在一次流程中完成角色首次定义
+- 不带参数的默认命令解析为 `self`
+- 角色数据存放在 `~/.roleMe/`，而不是当前仓库
+- 第一版采用渐进式披露，而不是一次性全量加载
+- 记忆采用“摘要层 + 情节层”的分层结构，而不是单一平铺文件
