@@ -2,6 +2,8 @@
 
 `/roleMe` 默认加载 `self`，若不存在则进入初始化流程。
 
+详细使用说明见 `references/usage.md`。
+
 命令面：
 - `/roleMe`
 - `/roleMe <角色名>`
