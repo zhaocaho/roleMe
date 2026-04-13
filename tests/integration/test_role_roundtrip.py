@@ -14,5 +14,5 @@ def test_role_roundtrip_init_load_write_memory_and_package(tmp_role_home, tmp_pa
     assert bundle.role_name == "self"
     assert "默认中文沟通" in snapshot
     assert report.missing_files == []
-    assert artifact.name == "roleMe"
+    assert artifact.name == "roleme"
     assert (artifact / "SKILL.md").exists()

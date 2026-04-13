@@ -57,13 +57,13 @@ python -m pip install -e ".[dev]"
 ./.venv/bin/python -c 'from pathlib import Path; from scripts.build_skill import build_skill; print(build_skill(Path("dist")))'
 ```
 
-打包结果会生成到：
+发布结果会生成到：
 
 ```text
-dist/roleMe/
+skills/roleme/
 ```
 
-当前产物默认包含：
+当前发布产物默认包含：
 
 - `SKILL.md`
 - `agents/openai.yaml`
@@ -71,7 +71,7 @@ dist/roleMe/
 - `assets/templates/`
 - `references/`（如果 `skill/references/` 存在）
 
-当前产物默认不包含：
+当前发布产物默认不包含：
 
 - `scripts/`
 - `tests/`

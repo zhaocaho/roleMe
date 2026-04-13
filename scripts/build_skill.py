@@ -10,7 +10,7 @@ def repo_root() -> Path:
 
 def build_skill(output_root: Path) -> Path:
     root = repo_root()
-    destination = output_root / "roleMe"
+    destination = output_root / "roleme"
     if destination.exists():
         shutil.rmtree(destination)
 
@@ -18,3 +18,7 @@ def build_skill(output_root: Path) -> Path:
     shutil.copytree(root / "tools", destination / "tools")
     shutil.copytree(root / "templates", destination / "assets" / "templates")
     return destination
+
+
+def publish_skill() -> Path:
+    return build_skill(repo_root() / "skills")
