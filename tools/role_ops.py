@@ -36,17 +36,6 @@ REQUIRED_FILES = [
     "self-model/decision-rules.md",
     "self-model/disclosure-layers.md",
 ]
-JSON_TO_FIELD = {
-    "roleName": "role_name",
-    "schemaVersion": "schema_version",
-    "roleVersion": "role_version",
-    "createdBySkillVersion": "created_by_skill_version",
-    "compatibleSkillRange": "compatible_skill_range",
-    "createdAt": "created_at",
-    "updatedAt": "updated_at",
-    "defaultLoadProfile": "default_load_profile",
-}
-FIELD_TO_JSON = {value: key for key, value in JSON_TO_FIELD.items()}
 
 
 @dataclass(frozen=True)
@@ -75,14 +64,14 @@ class RoleManifest:
 
     def write(self, path: Path) -> None:
         payload = {
-            FIELD_TO_JSON["role_name"]: self.role_name,
-            FIELD_TO_JSON["schema_version"]: self.schema_version,
-            FIELD_TO_JSON["role_version"]: self.role_version,
-            FIELD_TO_JSON["created_by_skill_version"]: self.created_by_skill_version,
-            FIELD_TO_JSON["compatible_skill_range"]: self.compatible_skill_range,
-            FIELD_TO_JSON["created_at"]: self.created_at,
-            FIELD_TO_JSON["updated_at"]: self.updated_at,
-            FIELD_TO_JSON["default_load_profile"]: self.default_load_profile,
+            "roleName": self.role_name,
+            "schemaVersion": self.schema_version,
+            "roleVersion": self.role_version,
+            "createdBySkillVersion": self.created_by_skill_version,
+            "compatibleSkillRange": self.compatible_skill_range,
+            "createdAt": self.created_at,
+            "updatedAt": self.updated_at,
+            "defaultLoadProfile": self.default_load_profile,
         }
         path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
