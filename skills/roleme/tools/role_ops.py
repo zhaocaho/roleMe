@@ -100,6 +100,12 @@ class QueryContextBundle:
 
 
 @dataclass(frozen=True)
+class RoleEntryPrompt:
+    existing_roles: list[str]
+    prompt: str
+
+
+@dataclass(frozen=True)
 class RoleInterviewTopic:
     slug: str
     title: str
@@ -233,8 +239,44 @@ def roleme_home() -> Path:
     return Path(override).expanduser() if override else Path.home() / ".roleMe"
 
 
+def normalize_role_name(role_name: str) -> str:
+    normalized = role_name.strip()
+    if not normalized:
+        raise ValueError("Role name must not be empty.")
+    if normalized in {".", ".."}:
+        raise ValueError("Role name must not be '.' or '..'.")
+    if "/" in normalized or "\\" in normalized:
+        raise ValueError("Role name must not contain path separators.")
+    return normalized
+
+
 def role_dir(role_name: str) -> Path:
-    return roleme_home() / role_name
+    return roleme_home() / normalize_role_name(role_name)
+
+
+def build_default_role_entry_prompt(user_language: str = "中文") -> RoleEntryPrompt:
+    roles = list_roles()
+    quoted_roles = "、".join(roles)
+    if _language_key(user_language) == "zh":
+        if roles:
+            prompt = (
+                f"当前已有这些角色：{quoted_roles}。你可以直接告诉我想加载哪个角色；"
+                "如果不想加载，也可以创建新角色。要创建的话，先告诉我你想用的角色名。"
+            )
+        else:
+            prompt = "当前还没有任何角色。你想创建的角色叫什么名字？支持直接使用中文角色名。"
+        return RoleEntryPrompt(existing_roles=roles, prompt=prompt)
+
+    if roles:
+        prompt = (
+            f"These roles already exist: {', '.join(roles)}. Tell me which one you want to load, "
+            "or tell me the name for a new role if you want to create one instead."
+        )
+    else:
+        prompt = (
+            "There are no roles yet. What would you like to call the new role? Chinese names are allowed."
+        )
+    return RoleEntryPrompt(existing_roles=roles, prompt=prompt)
 
 
 def _render(source: Path, destination: Path, role_name: str) -> None:
@@ -812,6 +854,7 @@ def render_interview_planner_system_prompt(session: InterviewSession) -> str:
 
 
 def initialize_role(role_name: str, skill_version: str) -> Path:
+    role_name = normalize_role_name(role_name)
     destination = role_dir(role_name)
     if destination.exists():
         raise FileExistsError(f"Role already exists: {destination}")
@@ -839,6 +882,7 @@ def initialize_role(role_name: str, skill_version: str) -> Path:
 
 
 def begin_role_interview(role_name: str, user_language: str = "中文") -> InterviewSession:
+    role_name = normalize_role_name(role_name)
     first_plan = _plan_next_turn_from_answers({}, user_language, ())
     return InterviewSession(
         role_name=role_name,
@@ -925,6 +969,7 @@ def initialize_role_from_interview(
     skill_version: str,
     interview: RoleInterview,
 ) -> Path:
+    role_name = normalize_role_name(role_name)
     destination = initialize_role(role_name=role_name, skill_version=skill_version)
 
     (destination / "persona" / "narrative.md").write_text(
@@ -988,6 +1033,7 @@ def initialize_role_from_interview(
 
 
 def load_role_bundle(role_name: str) -> RoleBundle:
+    role_name = normalize_role_name(role_name)
     base_path = role_dir(role_name)
     resident_files = {
         relative: (base_path / relative).read_text(encoding="utf-8")
@@ -1007,6 +1053,7 @@ def load_query_context_bundle(
     max_chars: int = 4_000,
     max_brain_depth: int = 1,
 ) -> QueryContextBundle:
+    role_name = normalize_role_name(role_name)
     base_path = role_dir(role_name)
     resident_files = {
         relative: (base_path / relative).read_text(encoding="utf-8")
@@ -1040,6 +1087,7 @@ def list_roles() -> list[str]:
 
 
 def export_role(role_name: str, output_dir: Path, as_zip: bool = True) -> Path:
+    role_name = normalize_role_name(role_name)
     source = role_dir(role_name)
     output_dir.mkdir(parents=True, exist_ok=True)
     if as_zip:
@@ -1057,6 +1105,7 @@ def export_role(role_name: str, output_dir: Path, as_zip: bool = True) -> Path:
 
 
 def doctor_role(role_name: str) -> DoctorReport:
+    role_name = normalize_role_name(role_name)
     base_path = role_dir(role_name)
     missing = [relative for relative in REQUIRED_FILES if not (base_path / relative).exists()]
     warnings: list[str] = []

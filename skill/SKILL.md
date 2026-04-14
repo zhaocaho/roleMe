@@ -5,7 +5,7 @@ description: Use when the user wants to initialize, switch, inspect, optimize, e
 
 # roleMe
 
-`/roleMe` 默认加载 `self`。如果角色不存在，就进入初始化流程。
+`/roleMe` 无参调用时，应先列出现有角色供用户选择加载；如果用户不想加载已有角色，就先问他要创建的角色名，再进入初始化流程。
 
 详细使用说明见 `references/usage.md`。
 
@@ -29,7 +29,8 @@ description: Use when the user wants to initialize, switch, inspect, optimize, e
 - 槽位只是归档目标，不是固定提问顺序；模型应按当前情景决定下一问，而不是机械执行问卷。
 - 初始化访谈应更像采访而不是填表：用户没有表达出来的信息可以先不记录，不要为了补全而反复追问同一槽位。
 - 槽位提示只是采访锚点，不是最终逐字发问文案；真正问用户前，应结合当前上下文先润色成自然口语。
+- 当用户第一次无参执行 `/roleMe` 时，应先列出现有角色，让用户选择加载；如果用户选择创建新角色，应先询问角色名，再开始采访。
 - 语言偏好应在初始化时显式采访一次；如果用户暂时没有给出明确偏好，可以留空并在后续使用中慢慢积累。
-- 初始化成功后，应明确提醒用户重新调用 `/roleMe`（对于默认 `self`）或 `/roleMe <角色名>`，以便把新写入的角色包加载进后续会话使用的快照。
+- 初始化成功后，应明确提醒用户重新调用 `/roleMe <角色名>`，以便把新写入的角色包加载进后续会话使用的快照。
 - 只有确定性的文件操作才调用 `tools/role_ops.py`、`tools/memory.py`、`tools/context_router.py`。
 - 打包产物中不包含开发仓库的 `scripts/`。

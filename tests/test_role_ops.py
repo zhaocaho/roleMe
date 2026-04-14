@@ -4,6 +4,7 @@ from tools.role_ops import (
     RoleInterviewTopic,
     assess_interview_gaps,
     begin_role_interview,
+    build_default_role_entry_prompt,
     build_interview_planner_prompt,
     doctor_role,
     finalize_role_interview,
@@ -47,12 +48,44 @@ def test_list_roles_returns_sorted_names(tmp_role_home):
     assert list_roles() == ["alpha", "beta"]
 
 
+def test_build_default_role_entry_prompt_asks_for_role_name_when_no_roles_exist(
+    tmp_role_home,
+):
+    prompt = build_default_role_entry_prompt()
+
+    assert prompt.existing_roles == []
+    assert "还没有任何角色" in prompt.prompt
+    assert "叫什么名字" in prompt.prompt
+
+
+def test_build_default_role_entry_prompt_lists_existing_roles_and_offers_creation(
+    tmp_role_home,
+):
+    initialize_role("产品经理", skill_version="0.1.0")
+    initialize_role("架构师", skill_version="0.1.0")
+
+    prompt = build_default_role_entry_prompt()
+
+    assert prompt.existing_roles == ["产品经理", "架构师"]
+    assert "产品经理" in prompt.prompt
+    assert "架构师" in prompt.prompt
+    assert "创建新角色" in prompt.prompt
+
+
 def test_doctor_role_reports_missing_file(tmp_role_home):
     role_path = initialize_role("self", skill_version="0.1.0")
     (role_path / "AGENT.md").unlink()
 
     report = doctor_role("self")
     assert "AGENT.md" in report.missing_files
+
+
+def test_initialize_role_accepts_chinese_role_name(tmp_role_home):
+    role_path = initialize_role("张朝", skill_version="0.1.0")
+    bundle = load_role_bundle("张朝")
+
+    assert role_path.name == "张朝"
+    assert bundle.role_name == "张朝"
 
 
 def test_load_query_context_bundle_returns_query_specific_snapshot(tmp_role_home):
