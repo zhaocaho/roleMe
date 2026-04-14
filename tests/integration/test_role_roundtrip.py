@@ -226,6 +226,7 @@ def test_role_roundtrip_interview_session_materializes_and_supports_query_contex
 
     answers = {
         "narrative": "I am an AI product strategist who moved from delivery work into role engineering, and I now focus on long-term human-AI collaboration systems.",
+        "language_preference": "默认中文，需要时也可以英文。",
         "communication_style": "Default to Chinese, lead with the conclusion, and keep collaboration direct and structured.",
         "decision_rules": "Prioritize execution, then consistency, then maintainability.",
         "disclosure_layers": "Start from resident context and expand only when needed.",
@@ -276,6 +277,7 @@ def test_role_roundtrip_interview_correction_with_replace_mode_materializes_late
         session,
         "I am an AI product strategist who moved from delivery work into role engineering, and I now focus on long-term human-AI collaboration systems.",
     )
+    session = submit_interview_answer(session, "默认中文，需要时也可以英文。")
     session = submit_interview_answer(
         session,
         "Default to Chinese, lead with the conclusion, and keep collaboration direct and structured.",
@@ -318,5 +320,35 @@ def test_role_roundtrip_interview_correction_with_replace_mode_materializes_late
     role_path = finalize_role_interview(session, skill_version="0.1.0")
 
     assert "keep responses concise and direct" in (
+        role_path / "persona" / "communication-style.md"
+    ).read_text(encoding="utf-8")
+
+
+def test_role_roundtrip_partial_interview_can_finalize_and_keep_growing_later(
+    tmp_role_home,
+):
+    session = begin_role_interview("self")
+    session = submit_interview_answer(
+        session,
+        "I am an AI product strategist who moved from delivery work into role engineering, and I now focus on long-term human-AI collaboration systems.",
+    )
+    session = submit_interview_answer(session, "")
+    session = submit_interview_answer(
+        session,
+        "Lead with the conclusion and keep collaboration direct and structured.",
+    )
+    session = submit_interview_answer(
+        session,
+        "Prioritize execution first, consistency second, and long-term maintainability third.",
+    )
+
+    role_path = finalize_role_interview(session, skill_version="0.1.0")
+
+    assert session.current_stage == "review"
+    assert (role_path / "persona" / "narrative.md").exists()
+    assert "Preferred language:" not in (
+        role_path / "memory" / "USER.md"
+    ).read_text(encoding="utf-8")
+    assert "Lead with the conclusion" in (
         role_path / "persona" / "communication-style.md"
     ).read_text(encoding="utf-8")

@@ -11,10 +11,12 @@
 - 优先选择当前信息增益最高的问题。
 - 同一个模型在不同情景里问出不同问题是正常的，只要最终归纳方向稳定。
 - 保持对话自然，但结果必须能稳定落到 `persona/`、`memory/`、`brain/`、`projects/`。
-- 用户语言：`<user-language>`。默认用该语言发问和组织表达，除非上下文明确要求切换。
+- 用户语言：`<user-language>`。默认用该语言发问和组织表达，除非上下文明确要求切换。这是当前访谈语言，不等于已经确认的长期语言偏好。
+- 语言偏好需要在访谈里显式采访一次；如果用户暂时没有表达清楚，可以先不记录。
+- 如果用户没有表达出某项信息，不要为了补全而反复追问同一槽位。
 - 当下一轮答案是在补充已有槽位时，使用 `answer_mode: "append"`。
 - 当下一轮答案是在纠正或覆盖旧内容时，使用 `answer_mode: "replace"`。
-- 只有当访谈已经足够扎实时，才把 `ready_to_finalize` 设为 `true`。
+- 当已经形成可用初稿时，就可以把 `ready_to_finalize` 设为 `true`；剩余信息允许后续慢慢积累。
 
 ## 当前会话
 
@@ -28,7 +30,7 @@
 
 ```json
 {
-  "target_slot": "narrative | communication_style | decision_rules | disclosure_layers | user_memory | memory_summary | brain_topics | projects | review",
+  "target_slot": "narrative | language_preference | communication_style | decision_rules | disclosure_layers | user_memory | memory_summary | brain_topics | projects | review",
   "question": "下一句真正要问用户的问题",
   "rationale": "为什么这句在当前上下文里信息增益最高",
   "answer_mode": "append | replace",

@@ -53,6 +53,15 @@ def test_build_skill_preserves_skill_frontmatter(tmp_path):
     assert "description:" in skill_md
 
 
+def test_build_skill_includes_reload_reminder_after_initialization(tmp_path):
+    artifact = build_skill(output_root=tmp_path)
+    skill_md = (artifact / "SKILL.md").read_text(encoding="utf-8")
+    usage_md = (artifact / "references" / "usage.md").read_text(encoding="utf-8")
+
+    assert "重新调用 `/roleMe`" in skill_md
+    assert "重新调用 `/roleMe <角色名>`" in usage_md
+
+
 def test_publish_skill_writes_repo_publish_directory(tmp_path, monkeypatch):
     (tmp_path / "skill" / "agents").mkdir(parents=True)
     (tmp_path / "skill" / "references").mkdir(parents=True)

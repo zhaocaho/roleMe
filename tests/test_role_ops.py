@@ -166,17 +166,17 @@ def test_begin_role_interview_can_start_in_english(tmp_role_home):
     assert "first-person" in session.current_prompt.lower()
 
 
-def test_submit_interview_answer_reasks_same_slot_when_answer_is_too_shallow(tmp_role_home):
+def test_submit_interview_answer_moves_forward_after_shallow_answer(tmp_role_home):
     session = begin_role_interview("self")
 
     next_session = submit_interview_answer(session, "I am a PM.")
 
-    assert next_session.current_stage == "narrative"
-    assert "还不够" in next_session.current_prompt
-    assert "怎么走到今天" in next_session.current_prompt
+    assert next_session.answers["narrative"] == "I am a PM."
+    assert next_session.current_stage == "language_preference"
+    assert "语言" in next_session.current_prompt
 
 
-def test_submit_interview_answer_moves_to_next_gap_when_answer_is_rich_enough(tmp_role_home):
+def test_submit_interview_answer_explicitly_interviews_language_preference(tmp_role_home):
     session = begin_role_interview("self")
 
     next_session = submit_interview_answer(
@@ -184,9 +184,9 @@ def test_submit_interview_answer_moves_to_next_gap_when_answer_is_rich_enough(tm
         "I am an AI product strategist who moved from delivery work into role engineering, and I now focus on building long-term human-AI collaboration systems.",
     )
 
-    assert next_session.current_stage == "communication_style"
-    assert "沟通" in next_session.current_prompt
-    assert "回答" in next_session.current_prompt
+    assert next_session.current_stage == "language_preference"
+    assert "语言" in next_session.current_prompt
+    assert "暂时" in next_session.current_prompt
 
 
 def test_submit_interview_answer_keeps_english_prompt_for_english_user(tmp_role_home):
@@ -197,8 +197,46 @@ def test_submit_interview_answer_keeps_english_prompt_for_english_user(tmp_role_
         "I am an AI product strategist who moved from delivery work into role engineering, and I now focus on long-term human-AI collaboration systems.",
     )
 
+    assert next_session.current_stage == "language_preference"
+    assert "language" in next_session.current_prompt.lower()
+
+
+def test_submit_interview_answer_can_skip_language_preference_without_blocking_flow(
+    tmp_role_home,
+):
+    session = begin_role_interview("self")
+    session = submit_interview_answer(
+        session,
+        "I am an AI product strategist who moved from delivery work into role engineering, and I now focus on long-term human-AI collaboration systems.",
+    )
+
+    next_session = submit_interview_answer(session, "")
+
+    assert "language_preference" not in next_session.answers
     assert next_session.current_stage == "communication_style"
-    assert "communication" in next_session.current_prompt.lower()
+    assert "沟通" in next_session.current_prompt
+
+
+def test_submit_interview_answer_advances_to_review_with_partial_profile(tmp_role_home):
+    session = begin_role_interview("self")
+    session = submit_interview_answer(
+        session,
+        "I am an AI product strategist who moved from delivery work into role engineering, and I now focus on long-term human-AI collaboration systems.",
+    )
+    session = submit_interview_answer(session, "")
+    session = submit_interview_answer(
+        session,
+        "Lead with the conclusion and keep collaboration direct and structured.",
+    )
+
+    review_session = submit_interview_answer(
+        session,
+        "Prioritize execution first, consistency second, and long-term maintainability third.",
+    )
+
+    assert review_session.current_stage == "review"
+    assert "慢慢补充" in review_session.current_prompt
+    assert "communication_style" in review_session.preview
 
 
 def test_submit_interview_answer_advances_to_review_with_preview(tmp_role_home):
@@ -206,6 +244,7 @@ def test_submit_interview_answer_advances_to_review_with_preview(tmp_role_home):
 
     answers = {
         "narrative": "I am an AI product strategist who moved from delivery work into role engineering, and I now focus on long-term human-AI collaboration systems.",
+        "language_preference": "默认中文，需要时也可以英文。",
         "communication_style": "Default to Chinese, lead with the conclusion, and keep collaboration direct and structured.",
         "decision_rules": "Prioritize execution first, consistency second, and long-term maintainability third.",
         "disclosure_layers": "Start from resident context, then expand project and topic context only when needed.",
@@ -250,6 +289,7 @@ def test_assess_interview_gaps_reports_missing_and_partial_slots():
 
     by_slot = {gap.slot: gap for gap in gaps}
     assert by_slot["narrative"].status == "partial"
+    assert by_slot["language_preference"].status == "missing"
     assert by_slot["communication_style"].status == "missing"
     assert by_slot["user_memory"].status == "partial"
 
@@ -275,6 +315,7 @@ def test_build_interview_planner_prompt_frames_slots_as_constraints_not_script(t
     assert "不是固定问卷" in prompt
     assert "归档目标" in prompt
     assert "信息增益最高" in prompt
+    assert "没表达出来可以先不记录" in prompt
     assert "answer_mode" in prompt
 
 
@@ -292,8 +333,8 @@ def test_submit_interview_answer_can_store_out_of_order_slot_without_breaking_fl
     )
 
     assert next_session.answers["decision_rules"].startswith("Prioritize execution first")
-    assert next_session.current_stage == "communication_style"
-    assert "沟通" in next_session.current_prompt
+    assert next_session.current_stage == "language_preference"
+    assert "语言" in next_session.current_prompt
 
 
 def test_submit_interview_answer_supports_replace_mode_for_corrections(tmp_role_home):
@@ -360,6 +401,7 @@ def test_finalize_role_interview_writes_role_bundle_from_session(tmp_role_home):
 
     answers = {
         "narrative": "I am an AI product strategist who moved from delivery work into role engineering, and I now focus on long-term human-AI collaboration systems.",
+        "language_preference": "默认中文，需要时也可以英文。",
         "communication_style": "Default to Chinese, lead with the conclusion, and keep collaboration direct and structured.",
         "decision_rules": "Prioritize execution, then consistency, then maintainability.",
         "disclosure_layers": "Start from resident context and expand only when needed.",
@@ -397,4 +439,28 @@ def test_finalize_role_interview_writes_role_bundle_from_session(tmp_role_home):
     assert "AI Product" in (role_path / "brain" / "index.md").read_text(encoding="utf-8")
     assert "Current priority is interview orchestration" in (
         role_path / "projects" / "roleme" / "memory.md"
+    ).read_text(encoding="utf-8")
+
+
+def test_finalize_role_interview_merges_language_preference_into_user_memory(tmp_role_home):
+    session = begin_role_interview("self")
+    session = submit_interview_answer(
+        session,
+        "I am an AI product strategist who moved from delivery work into role engineering, and I now focus on long-term human-AI collaboration systems.",
+    )
+    session = submit_interview_answer(session, "默认中文，需要时也可以英文。")
+    session = submit_interview_answer(
+        session,
+        "Lead with the conclusion and keep collaboration direct and structured.",
+    )
+    session = submit_interview_answer(
+        session,
+        "Prioritize execution first, consistency second, and long-term maintainability third.",
+    )
+    session = submit_interview_answer(session, "")
+
+    role_path = finalize_role_interview(session, skill_version="0.1.0")
+
+    assert "- Preferred language: 默认中文，需要时也可以英文。" in (
+        role_path / "memory" / "USER.md"
     ).read_text(encoding="utf-8")

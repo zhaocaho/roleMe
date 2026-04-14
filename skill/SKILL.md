@@ -27,5 +27,8 @@ description: Use when the user wants to initialize, switch, inspect, optimize, e
 - 主题知识与项目上下文通过 `tools/context_router.py` 做渐进式发现，不应一次性全量加载。
 - 初始化访谈可以是动态的：问题由模型根据当前已知信息和信息缺口来决定，但最终仍要落到稳定的 `persona/`、`memory/`、`brain/`、`projects/` 结构。
 - 槽位只是归档目标，不是固定提问顺序；模型应按当前情景决定下一问，而不是机械执行问卷。
+- 初始化访谈应更像采访而不是填表：用户没有表达出来的信息可以先不记录，不要为了补全而反复追问同一槽位。
+- 语言偏好应在初始化时显式采访一次；如果用户暂时没有给出明确偏好，可以留空并在后续使用中慢慢积累。
+- 初始化成功后，应明确提醒用户重新调用 `/roleMe`（对于默认 `self`）或 `/roleMe <角色名>`，以便把新写入的角色包加载进后续会话使用的快照。
 - 只有确定性的文件操作才调用 `tools/role_ops.py`、`tools/memory.py`、`tools/context_router.py`。
 - 打包产物中不包含开发仓库的 `scripts/`。
