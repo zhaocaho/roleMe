@@ -148,7 +148,9 @@ def test_initialize_role_from_interview_materializes_persona_memory_brain_and_pr
     ).read_text(encoding="utf-8")
 
 
-def test_begin_role_interview_starts_with_chinese_narrative_prompt(tmp_role_home):
+def test_begin_role_interview_starts_with_lightweight_chinese_narrative_prompt(
+    tmp_role_home,
+):
     session = begin_role_interview("self")
 
     assert session.role_name == "self"
@@ -156,14 +158,15 @@ def test_begin_role_interview_starts_with_chinese_narrative_prompt(tmp_role_home
     assert session.current_stage == "narrative"
     assert session.answers == {}
     assert session.preview == ""
-    assert "第一人称" in session.current_prompt
+    assert "先不用完整介绍" in session.current_prompt
+    assert "任选一个先说就行" in session.current_prompt
 
 
 def test_begin_role_interview_can_start_in_english(tmp_role_home):
     session = begin_role_interview("self", user_language="English")
 
     assert session.user_language == "English"
-    assert "first-person" in session.current_prompt.lower()
+    assert "no need for a full introduction" in session.current_prompt.lower()
 
 
 def test_submit_interview_answer_moves_forward_after_shallow_answer(tmp_role_home):
@@ -316,6 +319,7 @@ def test_build_interview_planner_prompt_frames_slots_as_constraints_not_script(t
     assert "归档目标" in prompt
     assert "信息增益最高" in prompt
     assert "没表达出来可以先不记录" in prompt
+    assert "不要逐字复述" in prompt
     assert "answer_mode" in prompt
 
 
@@ -394,6 +398,7 @@ def test_render_interview_planner_system_prompt_includes_json_contract(tmp_role_
     assert '"answer_mode"' in prompt
     assert "communication_style" in prompt
     assert "AI product strategist" in prompt
+    assert "不要逐字复述" in prompt
 
 
 def test_finalize_role_interview_writes_role_bundle_from_session(tmp_role_home):

@@ -191,7 +191,7 @@ INTERVIEW_CORE_SLOTS = [
 
 INTERVIEW_STAGE_PROMPTS = {
     "zh": {
-        "narrative": "请用第一人称介绍你自己：你是谁、怎么走到今天、现在处于什么阶段？",
+        "narrative": "先不用完整介绍。你可以只回答一小部分，比如职业身份、最近关注的事，或者你希望我怎么理解你，任选一个先说就行。",
         "language_preference": "你希望我后续默认用什么语言和你协作？如果暂时没有明确偏好，也可以先不定。",
         "communication_style": "你希望我默认怎么和你沟通协作？请说明回答风格、结构、节奏和语气。",
         "decision_rules": "当出现取舍时，你通常按什么优先级做决定？请说明第一、第二、第三优先级。",
@@ -202,7 +202,7 @@ INTERVIEW_STAGE_PROMPTS = {
         "projects": "请描述项目上下文，使用 `name:`、`context:`、`overlay:`、`memory:`，多个项目之间用 `---` 分隔，`memory:` 多条可用 `|` 分隔。",
     },
     "en": {
-        "narrative": "Please answer in first-person. Who are you, how did you get here, and what stage are you in now?",
+        "narrative": "No need for a full introduction. You can start with just one small piece, like your role, what you have been focused on recently, or how you want me to understand you.",
         "language_preference": "What language should I use by default when we work together? If you do not have a firm preference yet, we can leave it open for now.",
         "communication_style": "How do you prefer to communicate and collaborate: answer style, structure, pacing, and tone?",
         "decision_rules": "What decision rules do you use in priority order? Explain what you optimize for first, second, and third.",
@@ -684,6 +684,7 @@ def build_interview_planner_prompt(session: InterviewSession) -> str:
             "- 同一个模型在不同情景里问出不同问题是正常的。",
             "- 保持对话自然，同时确保结果能稳定落成角色包。",
             "- 用户没表达出来可以先不记录，不要为了补全而反复追问同一槽位。",
+            "- 默认槽位提示只是采访意图锚点，不要逐字复述，先按当前语境润色成自然口语再发问。",
             "",
             "已知信息:",
         ]
@@ -734,6 +735,7 @@ def build_interview_planner_prompt(session: InterviewSession) -> str:
         "- The same model may ask different questions in different situations and still be correct.",
         "- Keep the conversation natural, but converge toward a role bundle that can be materialized reliably.",
         "- If the user has not expressed something, you may leave it unrecorded for now instead of forcing backfill.",
+        "- Default slot prompts are intent anchors, not literal scripts. Polish them into natural wording before asking.",
         "",
         "Known answers:",
     ]
