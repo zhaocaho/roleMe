@@ -94,6 +94,17 @@ def test_build_skill_includes_harness_readability_guidance(tmp_path):
     assert "更适合被智能体消费的上下文" in usage_md
 
 
+def test_build_skill_includes_natural_language_archive_guidance(tmp_path):
+    artifact = build_skill(output_root=tmp_path)
+    skill_md = (artifact / "SKILL.md").read_text(encoding="utf-8")
+    usage_md = (artifact / "references" / "usage.md").read_text(encoding="utf-8")
+
+    assert "应主动进行归档，而不必等待用户显式下达“归档”指令" in skill_md
+    assert "判断不够确定时，优先写入 `memory/episodes/` 或项目记忆" in skill_md
+    assert "## 自然语言归档" in usage_md
+    assert "用户只需要自然表达内容，系统会先总结，再选择目标位置。" in usage_md
+
+
 def test_publish_skill_writes_repo_publish_directory(tmp_path, monkeypatch):
     (tmp_path / "skill" / "agents").mkdir(parents=True)
     (tmp_path / "skill" / "references").mkdir(parents=True)

@@ -36,6 +36,10 @@ description: Use when the user wants to initialize, switch, inspect, optimize, e
 - 语言偏好应在初始化时显式采访一次；如果用户暂时没有给出明确偏好，可以留空并在后续使用中慢慢积累。
 - 初始化成功后，应明确提醒用户重新调用 `/roleMe <角色名>`，以便把新写入的角色包加载进后续会话使用的快照。
 - 当角色已加载后，如果用户说“帮我总结这个项目的工作方式”或“帮我总结成通用的工作方式”，应直接把结果归档到当前角色，而不是只返回普通总结文本。
+- 当角色已加载后，若用户内容明显属于学习沉淀、项目复盘、方法论提炼、稳定偏好或长期协作规则，助手应主动进行归档，而不必等待用户显式下达“归档”指令。
+- 归档前应先提炼原始内容，再判断归档位置，而不是把原始对话直接整段落盘。
+- 默认先写入，再用一句短回执告知用户归档结果。
+- 判断不够确定时，优先写入 `memory/episodes/` 或项目记忆，不轻易提升到 `memory/USER.md` 与 `memory/MEMORY.md`。
 - 项目级 workflow 写入 `projects/<project-slug>/workflow.md`、`context.md`、`memory.md`；通用 workflow 写入 `brain/topics/general-workflow.md`，并将稳定规则提升到 `memory/USER.md` 与 `memory/MEMORY.md`。
 - 当前角色以 `ROLEME_HOME/.current-role.json` 为准；自然语言归档只能写当前角色。
 - 如果归档提升了 resident 规则或摘要，应提醒用户重新执行 `/roleMe <角色名>` 才会刷新当前会话底座。
