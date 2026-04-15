@@ -83,6 +83,17 @@ def test_build_skill_includes_workflow_archive_guidance(tmp_path):
     assert "重新执行 `/roleMe <角色名>`" in usage_md
 
 
+def test_build_skill_includes_harness_readability_guidance(tmp_path):
+    artifact = build_skill(output_root=tmp_path)
+    skill_md = (artifact / "SKILL.md").read_text(encoding="utf-8")
+    usage_md = (artifact / "references" / "usage.md").read_text(encoding="utf-8")
+
+    assert "未被结构化写入角色包的上下文，不应假定模型已经知道" in skill_md
+    assert "归档内容优先追求对智能体可读" in skill_md
+    assert "设计原则：为智能体可读性而设计" in usage_md
+    assert "更适合被智能体消费的上下文" in usage_md
+
+
 def test_publish_skill_writes_repo_publish_directory(tmp_path, monkeypatch):
     (tmp_path / "skill" / "agents").mkdir(parents=True)
     (tmp_path / "skill" / "references").mkdir(parents=True)

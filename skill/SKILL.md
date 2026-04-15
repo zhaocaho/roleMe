@@ -22,9 +22,12 @@ description: Use when the user wants to initialize, switch, inspect, optimize, e
 运行时原则：
 
 - `roleMe` 管理的是用户角色上下文，不是助手人格切换。
+- 未被结构化写入角色包的上下文，不应假定模型已经知道；稳定信息应落到 `persona/`、`memory/`、`brain/`、`projects/` 中可检索的位置。
 - 常驻层与渐进层的边界由角色包内的 `AGENT.md` 决定。
+- 常驻层应保持最小且稳定；细节、专题知识与项目上下文优先按需展开，而不是堆进单个总说明。
 - 记忆写回优先遵循 `AGENT.md` 中的策略和 `memory/` 结构。
 - 主题知识与项目上下文通过 `tools/context_router.py` 做渐进式发现，不应一次性全量加载。
+- 归档内容优先追求对智能体可读：结构清晰、边界明确、可检索、可增量更新，而不是只写成长段自由叙述。
 - 初始化访谈可以是动态的：问题由模型根据当前已知信息和信息缺口来决定，但最终仍要落到稳定的 `persona/`、`memory/`、`brain/`、`projects/` 结构。
 - 槽位只是归档目标，不是固定提问顺序；模型应按当前情景决定下一问，而不是机械执行问卷。
 - 初始化访谈应更像采访而不是填表：用户没有表达出来的信息可以先不记录，不要为了补全而反复追问同一槽位。
@@ -36,5 +39,6 @@ description: Use when the user wants to initialize, switch, inspect, optimize, e
 - 项目级 workflow 写入 `projects/<project-slug>/workflow.md`、`context.md`、`memory.md`；通用 workflow 写入 `brain/topics/general-workflow.md`，并将稳定规则提升到 `memory/USER.md` 与 `memory/MEMORY.md`。
 - 当前角色以 `ROLEME_HOME/.current-role.json` 为准；自然语言归档只能写当前角色。
 - 如果归档提升了 resident 规则或摘要，应提醒用户重新执行 `/roleMe <角色名>` 才会刷新当前会话底座。
+- `optimize` 与 `doctor` 应优先发现和修复角色包的熵增问题，例如重复记忆、索引失效、resident/on-demand 边界漂移。
 - 只有确定性的文件操作才调用 `tools/role_ops.py`、`tools/memory.py`、`tools/context_router.py`。
 - 打包产物中不包含开发仓库的 `scripts/`。
