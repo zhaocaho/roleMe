@@ -450,6 +450,63 @@ def resolve_current_project_identity(
     raise ValueError("Unable to resolve current project identity.")
 
 
+def _current_git_repo_root() -> Path | None:
+    cwd = Path.cwd()
+    git_marker = cwd / ".git"
+    if git_marker.exists():
+        return cwd
+    return None
+
+
+def _write_if_missing(path: Path, content: str) -> None:
+    if not path.exists():
+        path.write_text(content, encoding="utf-8")
+
+
+def maybe_bootstrap_project_from_cwd(role_path: Path) -> ProjectIdentity | None:
+    repo_root = _current_git_repo_root()
+    if repo_root is None:
+        return None
+
+    identity = resolve_current_project_identity(
+        role_path,
+        explicit_project=None,
+        workspace_name=repo_root.name,
+    )
+    project_dir = role_path / "projects" / identity.slug
+    project_dir.mkdir(parents=True, exist_ok=True)
+
+    _write_if_missing(
+        project_dir / "context.md",
+        (
+            f"# {identity.title}\n\n"
+            "自动从当前 Git 仓库根目录识别为当前项目。\n\n"
+            f"- Workspace: {repo_root}\n"
+        ),
+    )
+    _write_if_missing(
+        project_dir / "overlay.md",
+        (
+            f"# {identity.title} overlay\n\n"
+            "记录该项目特有的协作约束与回答偏置，后续按需补充。\n"
+        ),
+    )
+    _write_if_missing(
+        project_dir / "memory.md",
+        (
+            f"# {identity.title} memory\n\n"
+            "- 项目目录已由 roleMe 在角色加载时根据当前 Git 仓库根目录自动初始化。\n"
+        ),
+    )
+    upsert_markdown_index_entry(
+        role_path / "projects" / "index.md",
+        label=identity.title,
+        target=f"projects/{identity.slug}/context.md",
+        summary="自动从当前 Git 仓库根目录初始化。",
+    )
+    return identity
+
+
 def _sanitize_archive_text(content: str, minimum_chars: int) -> str:
     sanitized = content.strip()
     for pattern in ARCHIVE_UNSAFE_PATTERNS:
@@ -1332,6 +1389,7 @@ def load_role_bundle(role_name: str) -> RoleBundle:
         for relative in RESIDENT_PATHS
     }
     set_current_role_state(role_name)
+    maybe_bootstrap_project_from_cwd(base_path)
     return RoleBundle(
         role_name=role_name,
         role_path=str(base_path),
@@ -1353,6 +1411,7 @@ def load_query_context_bundle(
         for relative in RESIDENT_PATHS
     }
     set_current_role_state(role_name)
+    maybe_bootstrap_project_from_cwd(base_path)
     discovered_paths = discover_context_paths(
         base_path,
         query=query,

@@ -67,6 +67,75 @@ def test_load_role_bundle_persists_current_role_state(tmp_role_home):
     assert state.loaded_at
 
 
+def test_load_role_bundle_bootstraps_project_from_git_repo_root(
+    tmp_role_home,
+    tmp_path,
+    monkeypatch,
+):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    repo_root = tmp_path / "roleMe"
+    repo_root.mkdir()
+    (repo_root / ".git").mkdir()
+    monkeypatch.chdir(repo_root)
+
+    load_role_bundle("self")
+
+    project_dir = role_path / "projects" / "roleme"
+    assert (project_dir / "context.md").exists()
+    assert (project_dir / "overlay.md").exists()
+    assert (project_dir / "memory.md").exists()
+    assert "projects/roleme/context.md" in (
+        role_path / "projects" / "index.md"
+    ).read_text(encoding="utf-8")
+
+
+def test_load_role_bundle_does_not_bootstrap_project_from_git_subdirectory(
+    tmp_role_home,
+    tmp_path,
+    monkeypatch,
+):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    repo_root = tmp_path / "roleMe"
+    repo_root.mkdir()
+    (repo_root / ".git").mkdir()
+    child_dir = repo_root / "packages" / "web"
+    child_dir.mkdir(parents=True)
+    monkeypatch.chdir(child_dir)
+
+    load_role_bundle("self")
+
+    assert not (role_path / "projects" / "roleme").exists()
+    assert "projects/roleme/context.md" not in (
+        role_path / "projects" / "index.md"
+    ).read_text(encoding="utf-8")
+
+
+def test_load_role_bundle_bootstraps_missing_project_files_without_overwriting_existing_content(
+    tmp_role_home,
+    tmp_path,
+    monkeypatch,
+):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    project_dir = role_path / "projects" / "roleme"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    context_path = project_dir / "context.md"
+    context_path.write_text("# custom context\n\nkeep me\n", encoding="utf-8")
+
+    repo_root = tmp_path / "roleMe"
+    repo_root.mkdir()
+    (repo_root / ".git").mkdir()
+    monkeypatch.chdir(repo_root)
+
+    load_role_bundle("self")
+
+    assert context_path.read_text(encoding="utf-8") == "# custom context\n\nkeep me\n"
+    assert (project_dir / "overlay.md").exists()
+    assert (project_dir / "memory.md").exists()
+    assert "projects/roleme/context.md" in (
+        role_path / "projects" / "index.md"
+    ).read_text(encoding="utf-8")
+
+
 def test_load_query_context_bundle_refreshes_current_role_state(tmp_role_home):
     initialize_role("self", skill_version="0.1.0")
 
