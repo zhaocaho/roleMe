@@ -92,6 +92,24 @@
 - 当前会话默认不会立刻重建整块常驻上下文
 - 重新加载或重新切换角色后，才会拿到新的冻结快照
 
+## 工作方式归档
+
+当角色已经加载后，你可以直接说：
+
+- 帮我总结这个项目的工作方式
+- 帮我总结成通用的工作方式
+
+系统会把内容写回当前角色，而不是只返回一段总结文本。
+
+当前角色由 `ROLEME_HOME/.current-role.json` 记录；自然语言归档只能写这个 active role。
+
+默认归档路径：
+
+- 项目级 workflow：`projects/<project-slug>/workflow.md`、`context.md`、`memory.md`
+- 通用 workflow：`brain/topics/general-workflow.md`、`brain/index.md`、`memory/USER.md`、`memory/MEMORY.md`
+
+如果本次写入提升了 `memory/USER.md` 或 `memory/MEMORY.md`，需要重新执行 `/roleMe <角色名>` 才会刷新当前会话的 resident snapshot。
+
 ## 初始化访谈如何工作
 
 ### 动态访谈，不是固定问卷

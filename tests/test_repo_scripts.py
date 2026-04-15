@@ -72,6 +72,17 @@ def test_build_skill_removes_default_self_semantics(tmp_path):
     assert "当前已有这些角色" in usage_md
 
 
+def test_build_skill_includes_workflow_archive_guidance(tmp_path):
+    artifact = build_skill(output_root=tmp_path)
+    skill_md = (artifact / "SKILL.md").read_text(encoding="utf-8")
+    usage_md = (artifact / "references" / "usage.md").read_text(encoding="utf-8")
+
+    assert "帮我总结这个项目的工作方式" in skill_md
+    assert "帮我总结成通用的工作方式" in skill_md
+    assert ".current-role.json" in usage_md
+    assert "重新执行 `/roleMe <角色名>`" in usage_md
+
+
 def test_publish_skill_writes_repo_publish_directory(tmp_path, monkeypatch):
     (tmp_path / "skill" / "agents").mkdir(parents=True)
     (tmp_path / "skill" / "references").mkdir(parents=True)

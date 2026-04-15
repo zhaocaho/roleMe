@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
 from pathlib import Path
 import json
 import os
@@ -9,6 +10,7 @@ import re
 import shutil
 
 from tools.context_router import build_context_snapshot, discover_context_paths
+from tools.memory import write_memory
 
 
 SCHEMA_VERSION = "1.0"
@@ -97,6 +99,42 @@ class QueryContextBundle:
     resident_files: dict[str, str]
     discovered_paths: list[str]
     context_snapshot: str
+
+
+@dataclass(frozen=True)
+class CurrentRoleState:
+    role_name: str
+    role_path: str
+    loaded_at: str
+
+
+@dataclass(frozen=True)
+class ProjectIdentity:
+    title: str
+    slug: str
+
+
+@dataclass(frozen=True)
+class WorkflowArchivePlan:
+    kind: str
+    role_name: str | None
+    project_title: str | None
+    project_slug: str | None
+    workflow_title: str
+    workflow_doc_markdown: str
+    context_summary_markdown: str
+    user_rules: list[str]
+    memory_summary: list[str]
+    project_memory: list[str]
+
+
+@dataclass(frozen=True)
+class WorkflowArchiveResult:
+    role_name: str
+    project_title: str | None
+    project_slug: str | None
+    written_paths: list[str]
+    requires_reload: bool
 
 
 @dataclass(frozen=True)
@@ -224,6 +262,12 @@ INTERVIEW_REVIEW_PROMPTS = {
     "zh": "已经有一版可用初稿了。剩下没说到的信息可以在后续使用里慢慢补充。请确认是否先将这份预览写入角色包。",
     "en": "There is now a usable draft. Anything still unsaid can be accumulated gradually during later use. Please confirm whether this preview should be materialized into the role bundle now.",
 }
+ARCHIVE_UNSAFE_PATTERNS = [
+    re.compile(r"ignore previous instructions", re.IGNORECASE),
+    re.compile(r"system prompt", re.IGNORECASE),
+    re.compile(r"developer prompt", re.IGNORECASE),
+    re.compile(r"[\u200b-\u200f\u2060\ufeff]"),
+]
 
 
 def repo_root() -> Path:
@@ -252,6 +296,53 @@ def normalize_role_name(role_name: str) -> str:
 
 def role_dir(role_name: str) -> Path:
     return roleme_home() / normalize_role_name(role_name)
+
+
+def current_role_state_path() -> Path:
+    return roleme_home() / ".current-role.json"
+
+
+def set_current_role_state(role_name: str) -> CurrentRoleState:
+    role_name = normalize_role_name(role_name)
+    base_path = role_dir(role_name)
+    if not base_path.exists():
+        raise FileNotFoundError(f"Role does not exist: {base_path}")
+
+    state = CurrentRoleState(
+        role_name=role_name,
+        role_path=str(base_path),
+        loaded_at=datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
+    )
+    payload = {
+        "roleName": state.role_name,
+        "rolePath": state.role_path,
+        "loadedAt": state.loaded_at,
+    }
+    current_role_state_path().write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return state
+
+
+def get_current_role_state() -> CurrentRoleState:
+    path = current_role_state_path()
+    if not path.exists():
+        raise FileNotFoundError("No current role is loaded.")
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    role_name = normalize_role_name(str(payload.get("roleName", "")).strip())
+    role_path = Path(str(payload.get("rolePath", "")).strip())
+    loaded_at = str(payload.get("loadedAt", "")).strip()
+    expected_path = role_dir(role_name)
+    if role_path != expected_path or not expected_path.exists() or not loaded_at:
+        raise ValueError("Current role pointer is invalid.")
+
+    return CurrentRoleState(
+        role_name=role_name,
+        role_path=str(expected_path),
+        loaded_at=loaded_at,
+    )
 
 
 def build_default_role_entry_prompt(user_language: str = "中文") -> RoleEntryPrompt:
@@ -323,6 +414,207 @@ def _replace_marker_entries(path: Path, entries: list[str]) -> None:
 def _slugify(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug or "topic"
+
+
+def _project_slug_fallback(value: str) -> str:
+    digest = hashlib.sha1(value.encode("utf-8")).hexdigest()[:8]
+    return f"project-{digest}"
+
+
+def slugify_project_title(value: str) -> str:
+    lowered = value.strip().casefold()
+    slug = re.sub(r"[^a-z0-9]+", "-", lowered).strip("-")
+    return slug or _project_slug_fallback(value)
+
+
+def resolve_current_project_identity(
+    role_path: Path,
+    explicit_project: str | None,
+    workspace_name: str | None,
+) -> ProjectIdentity:
+    existing_slugs = sorted(
+        path.name
+        for path in (role_path / "projects").iterdir()
+        if path.is_dir()
+    )
+    if explicit_project:
+        title = explicit_project.strip()
+        return ProjectIdentity(title=title, slug=slugify_project_title(title))
+    if workspace_name:
+        title = workspace_name.strip()
+        slug = slugify_project_title(title)
+        return ProjectIdentity(title=title, slug=slug)
+    if len(existing_slugs) == 1:
+        only_slug = existing_slugs[0]
+        return ProjectIdentity(title=only_slug, slug=only_slug)
+    raise ValueError("Unable to resolve current project identity.")
+
+
+def _sanitize_archive_text(content: str, minimum_chars: int) -> str:
+    sanitized = content.strip()
+    for pattern in ARCHIVE_UNSAFE_PATTERNS:
+        if pattern.search(sanitized):
+            raise ValueError("Archived content contains unsafe text.")
+    if len(sanitized) < minimum_chars:
+        raise ValueError("Archived content is too short.")
+    return sanitized
+
+
+def sanitize_archived_markdown(content: str, minimum_chars: int = 12) -> str:
+    return _sanitize_archive_text(content, minimum_chars=minimum_chars)
+
+
+def sanitize_archive_entry(content: str, minimum_chars: int = 4) -> str:
+    normalized = content.strip().strip("-").strip()
+    return _sanitize_archive_text(normalized, minimum_chars=minimum_chars)
+
+
+def summarize_index_entry(summary: str) -> str:
+    for raw_line in summary.splitlines():
+        line = raw_line.strip(" -#\t")
+        if line:
+            return line
+    return ""
+
+
+def parse_workflow_archive_response(raw: str | dict[str, object]) -> WorkflowArchivePlan:
+    payload = json.loads(raw) if isinstance(raw, str) else dict(raw)
+    kind = str(payload.get("kind", "")).strip().lower()
+    if kind not in {"general", "project"}:
+        raise ValueError(f"Unsupported workflow archive kind: {kind}")
+
+    project_title = payload.get("project_title")
+    project_slug = payload.get("project_slug")
+    user_rules = [
+        str(item).strip()
+        for item in payload.get("user_rules", [])
+        if str(item).strip()
+    ]
+    memory_summary = [
+        str(item).strip()
+        for item in payload.get("memory_summary", [])
+        if str(item).strip()
+    ]
+    project_memory = [
+        str(item).strip()
+        for item in payload.get("project_memory", [])
+        if str(item).strip()
+    ]
+
+    return WorkflowArchivePlan(
+        kind=kind,
+        role_name=str(payload.get("role_name")).strip() if payload.get("role_name") is not None else None,
+        project_title=str(project_title).strip() if project_title is not None else None,
+        project_slug=str(project_slug).strip() if project_slug is not None else None,
+        workflow_title=str(payload.get("workflow_title", "")).strip(),
+        workflow_doc_markdown=str(payload.get("workflow_doc_markdown", "")).strip(),
+        context_summary_markdown=str(payload.get("context_summary_markdown", "")).strip(),
+        user_rules=user_rules,
+        memory_summary=memory_summary,
+        project_memory=project_memory,
+    )
+
+
+def upsert_markdown_index_entry(index_path: Path, label: str, target: str, summary: str = "") -> None:
+    lines = index_path.read_text(encoding="utf-8").splitlines()
+    entry_line = f"- {label}: {target}"
+    if entry_line in lines:
+        return
+
+    summary_line = summarize_index_entry(summary)
+    if summary_line:
+        lines.extend([entry_line, f"  - {summary_line}"])
+    else:
+        lines.append(entry_line)
+    index_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
+
+
+def append_unique_project_memory(memory_path: Path, entries: list[str]) -> None:
+    lines = (
+        memory_path.read_text(encoding="utf-8").splitlines()
+        if memory_path.exists()
+        else ["# project memory", ""]
+    )
+    existing = {line.strip() for line in lines if line.strip().startswith("- ")}
+    for entry in entries:
+        safe_entry = sanitize_archive_entry(entry)
+        bullet = f"- {safe_entry}"
+        if bullet not in existing:
+            lines.append(bullet)
+            existing.add(bullet)
+    memory_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
+
+
+def archive_general_workflow(plan: WorkflowArchivePlan) -> WorkflowArchiveResult:
+    current = get_current_role_state()
+    if plan.role_name and plan.role_name != current.role_name:
+        raise ValueError("Workflow archive role does not match the current role.")
+
+    role_path = Path(current.role_path)
+    workflow_doc = sanitize_archived_markdown(plan.workflow_doc_markdown)
+    topic_path = role_path / "brain" / "topics" / "general-workflow.md"
+    topic_path.write_text(workflow_doc + "\n", encoding="utf-8")
+    upsert_markdown_index_entry(
+        role_path / "brain" / "index.md",
+        label=plan.workflow_title,
+        target="topics/general-workflow.md",
+        summary=plan.context_summary_markdown,
+    )
+    for rule in plan.user_rules:
+        write_memory(role_path, target="user", content=sanitize_archive_entry(rule))
+    for item in plan.memory_summary:
+        write_memory(role_path, target="memory", content=sanitize_archive_entry(item))
+    return WorkflowArchiveResult(
+        role_name=current.role_name,
+        project_title=None,
+        project_slug=None,
+        written_paths=[
+            "brain/topics/general-workflow.md",
+            "brain/index.md",
+            "memory/USER.md",
+            "memory/MEMORY.md",
+        ],
+        requires_reload=bool(plan.user_rules or plan.memory_summary),
+    )
+
+
+def archive_project_workflow(plan: WorkflowArchivePlan) -> WorkflowArchiveResult:
+    current = get_current_role_state()
+    if plan.role_name and plan.role_name != current.role_name:
+        raise ValueError("Workflow archive role does not match the current role.")
+    if not plan.project_title or not plan.project_slug:
+        raise ValueError("Project workflow archive requires project title and slug.")
+
+    role_path = Path(current.role_path)
+    project_dir = role_path / "projects" / plan.project_slug
+    project_dir.mkdir(parents=True, exist_ok=True)
+
+    workflow_doc = sanitize_archived_markdown(plan.workflow_doc_markdown)
+    context_doc = sanitize_archived_markdown(plan.context_summary_markdown)
+    if "workflow.md" not in context_doc:
+        context_doc = context_doc + "\n\n- Workflow: workflow.md"
+
+    (project_dir / "workflow.md").write_text(workflow_doc + "\n", encoding="utf-8")
+    (project_dir / "context.md").write_text(context_doc.strip() + "\n", encoding="utf-8")
+    append_unique_project_memory(project_dir / "memory.md", plan.project_memory)
+    upsert_markdown_index_entry(
+        role_path / "projects" / "index.md",
+        label=plan.project_title,
+        target=f"projects/{plan.project_slug}/context.md",
+        summary="记录项目上下文与 workflow 入口。",
+    )
+    return WorkflowArchiveResult(
+        role_name=current.role_name,
+        project_title=plan.project_title,
+        project_slug=plan.project_slug,
+        written_paths=[
+            f"projects/{plan.project_slug}/workflow.md",
+            f"projects/{plan.project_slug}/context.md",
+            f"projects/{plan.project_slug}/memory.md",
+            "projects/index.md",
+        ],
+        requires_reload=False,
+    )
 
 
 def _parse_list(text: str) -> list[str]:
@@ -1039,6 +1331,7 @@ def load_role_bundle(role_name: str) -> RoleBundle:
         relative: (base_path / relative).read_text(encoding="utf-8")
         for relative in RESIDENT_PATHS
     }
+    set_current_role_state(role_name)
     return RoleBundle(
         role_name=role_name,
         role_path=str(base_path),
@@ -1059,6 +1352,7 @@ def load_query_context_bundle(
         relative: (base_path / relative).read_text(encoding="utf-8")
         for relative in RESIDENT_PATHS
     }
+    set_current_role_state(role_name)
     discovered_paths = discover_context_paths(
         base_path,
         query=query,

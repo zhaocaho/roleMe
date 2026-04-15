@@ -151,6 +151,32 @@ def discover_brain_paths(role_path: Path, query: str, max_depth: int = 1) -> lis
     return discovered
 
 
+def _follow_project_context_links(role_path: Path, context_relative: str) -> list[str]:
+    context_path = role_path / context_relative
+    if not context_path.exists():
+        return []
+
+    discovered: list[str] = []
+    for linked in _extract_markdown_paths(context_path.read_text(encoding="utf-8")):
+        normalized = linked.replace("\\", "/").lstrip("./")
+        if normalized.startswith("projects/"):
+            relative, full_path = _resolve_project_path(role_path, normalized)
+        else:
+            full_path = context_path.parent / normalized
+            try:
+                relative = full_path.relative_to(role_path).as_posix()
+            except ValueError:
+                continue
+        if (
+            full_path.exists()
+            and full_path.is_file()
+            and full_path.parent == context_path.parent
+            and relative not in discovered
+        ):
+            discovered.append(relative)
+    return discovered
+
+
 def discover_project_paths(role_path: Path, query: str) -> list[str]:
     index_relative = "projects/index.md"
     index_path = role_path / index_relative
@@ -179,6 +205,8 @@ def discover_project_paths(role_path: Path, query: str) -> list[str]:
     scored_candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
     _, top_relative, _ = scored_candidates[0]
     discovered.append(top_relative)
+    for linked_relative in _follow_project_context_links(role_path, top_relative):
+        discovered.append(linked_relative)
     return discovered
 
 

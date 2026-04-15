@@ -9,11 +9,13 @@ from tools.role_ops import (
     RoleInterview,
     RoleInterviewProject,
     RoleInterviewTopic,
+    archive_general_workflow,
     begin_role_interview,
     doctor_role,
     finalize_role_interview,
     initialize_role,
     initialize_role_from_interview,
+    parse_workflow_archive_response,
     load_query_context_bundle,
     load_role_bundle,
     submit_interview_answer,
@@ -352,3 +354,29 @@ def test_role_roundtrip_partial_interview_can_finalize_and_keep_growing_later(
     assert "Lead with the conclusion" in (
         role_path / "persona" / "communication-style.md"
     ).read_text(encoding="utf-8")
+
+
+def test_role_roundtrip_archives_general_workflow_and_reloads_snapshot_notice(
+    tmp_role_home,
+):
+    initialize_role("self", skill_version="0.1.0")
+    load_role_bundle("self")
+    plan = parse_workflow_archive_response(
+        {
+            "kind": "general",
+            "role_name": "self",
+            "project_title": None,
+            "project_slug": None,
+            "workflow_title": "通用协作工作流",
+            "workflow_doc_markdown": "# 通用协作工作流\n\n先澄清场景，再开始执行。\n",
+            "context_summary_markdown": "## 适用场景\n\n适合需要先设计后执行的任务。\n",
+            "user_rules": ["先澄清场景，再开始执行"],
+            "memory_summary": ["可复用流程应沉淀为通用工作方式"],
+            "project_memory": [],
+        }
+    )
+
+    result = archive_general_workflow(plan)
+
+    assert "memory/MEMORY.md" in result.written_paths
+    assert result.requires_reload is True

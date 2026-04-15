@@ -2,6 +2,7 @@ from tools.context_router import (
     build_context_snapshot,
     discover_brain_paths,
     discover_context_paths,
+    discover_project_paths,
     route_context_lookup,
 )
 from tools.role_ops import initialize_role
@@ -114,6 +115,32 @@ def test_discover_context_paths_combines_project_and_brain_context(tmp_role_home
         "projects/roleme/context.md",
         "brain/index.md",
         "brain/topics/ai-product.md",
+    ]
+
+
+def test_discover_project_paths_follows_context_workflow_link_one_hop(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    project_dir = role_path / "projects" / "roleme"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (role_path / "projects" / "index.md").write_text(
+        "# 项目索引\n\n- roleMe: projects/roleme/context.md\n",
+        encoding="utf-8",
+    )
+    (project_dir / "context.md").write_text(
+        "# roleMe\n\n- Workflow: workflow.md\n",
+        encoding="utf-8",
+    )
+    (project_dir / "workflow.md").write_text(
+        "# roleMe Workflow\n\n先对齐目标，再分解任务。\n",
+        encoding="utf-8",
+    )
+
+    result = discover_project_paths(role_path, query="这个项目怎么协作")
+
+    assert result == [
+        "projects/index.md",
+        "projects/roleme/context.md",
+        "projects/roleme/workflow.md",
     ]
 
 

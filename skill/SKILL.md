@@ -32,5 +32,9 @@ description: Use when the user wants to initialize, switch, inspect, optimize, e
 - 当用户第一次无参执行 `/roleMe` 时，应先列出现有角色，让用户选择加载；如果用户选择创建新角色，应先询问角色名，再开始采访。
 - 语言偏好应在初始化时显式采访一次；如果用户暂时没有给出明确偏好，可以留空并在后续使用中慢慢积累。
 - 初始化成功后，应明确提醒用户重新调用 `/roleMe <角色名>`，以便把新写入的角色包加载进后续会话使用的快照。
+- 当角色已加载后，如果用户说“帮我总结这个项目的工作方式”或“帮我总结成通用的工作方式”，应直接把结果归档到当前角色，而不是只返回普通总结文本。
+- 项目级 workflow 写入 `projects/<project-slug>/workflow.md`、`context.md`、`memory.md`；通用 workflow 写入 `brain/topics/general-workflow.md`，并将稳定规则提升到 `memory/USER.md` 与 `memory/MEMORY.md`。
+- 当前角色以 `ROLEME_HOME/.current-role.json` 为准；自然语言归档只能写当前角色。
+- 如果归档提升了 resident 规则或摘要，应提醒用户重新执行 `/roleMe <角色名>` 才会刷新当前会话底座。
 - 只有确定性的文件操作才调用 `tools/role_ops.py`、`tools/memory.py`、`tools/context_router.py`。
 - 打包产物中不包含开发仓库的 `scripts/`。
