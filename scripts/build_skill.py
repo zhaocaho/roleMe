@@ -8,6 +8,10 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def skill_source_dir() -> str:
+    return "bundle"
+
+
 def _ignore_runtime_artifacts(_directory: str, names: list[str]) -> set[str]:
     ignored: set[str] = set()
     for name in names:
@@ -22,7 +26,7 @@ def build_skill(output_root: Path) -> Path:
     if destination.exists():
         shutil.rmtree(destination)
 
-    shutil.copytree(root / "skill", destination)
+    shutil.copytree(root / skill_source_dir(), destination)
     shutil.copytree(
         root / "tools",
         destination / "tools",

@@ -19,14 +19,14 @@ def test_build_skill_creates_artifact_without_scripts(tmp_path):
 
 
 def test_build_skill_ignores_python_cache_files(tmp_path, monkeypatch):
-    (tmp_path / "skill" / "agents").mkdir(parents=True)
-    (tmp_path / "skill" / "references").mkdir(parents=True)
+    (tmp_path / "bundle" / "agents").mkdir(parents=True)
+    (tmp_path / "bundle" / "references").mkdir(parents=True)
     (tmp_path / "tools" / "__pycache__").mkdir(parents=True)
     (tmp_path / "templates" / "persona").mkdir(parents=True)
 
-    (tmp_path / "skill" / "SKILL.md").write_text("---\nname: roleme\n---\n", encoding="utf-8")
-    (tmp_path / "skill" / "agents" / "openai.yaml").write_text("name: roleMe\n", encoding="utf-8")
-    (tmp_path / "skill" / "references" / "usage.md").write_text("usage\n", encoding="utf-8")
+    (tmp_path / "bundle" / "SKILL.md").write_text("---\nname: roleme\n---\n", encoding="utf-8")
+    (tmp_path / "bundle" / "agents" / "openai.yaml").write_text("name: roleMe\n", encoding="utf-8")
+    (tmp_path / "bundle" / "references" / "usage.md").write_text("usage\n", encoding="utf-8")
     (tmp_path / "tools" / "role_ops.py").write_text("", encoding="utf-8")
     (tmp_path / "tools" / "memory.py").write_text("", encoding="utf-8")
     (tmp_path / "tools" / "context_router.py").write_text("", encoding="utf-8")
@@ -106,14 +106,14 @@ def test_build_skill_includes_natural_language_archive_guidance(tmp_path):
 
 
 def test_publish_skill_writes_repo_publish_directory(tmp_path, monkeypatch):
-    (tmp_path / "skill" / "agents").mkdir(parents=True)
-    (tmp_path / "skill" / "references").mkdir(parents=True)
+    (tmp_path / "bundle" / "agents").mkdir(parents=True)
+    (tmp_path / "bundle" / "references").mkdir(parents=True)
     (tmp_path / "tools").mkdir()
     (tmp_path / "templates" / "persona").mkdir(parents=True)
 
-    (tmp_path / "skill" / "SKILL.md").write_text("---\nname: roleme\n---\n", encoding="utf-8")
-    (tmp_path / "skill" / "agents" / "openai.yaml").write_text("name: roleMe\n", encoding="utf-8")
-    (tmp_path / "skill" / "references" / "usage.md").write_text("usage\n", encoding="utf-8")
+    (tmp_path / "bundle" / "SKILL.md").write_text("---\nname: roleme\n---\n", encoding="utf-8")
+    (tmp_path / "bundle" / "agents" / "openai.yaml").write_text("name: roleMe\n", encoding="utf-8")
+    (tmp_path / "bundle" / "references" / "usage.md").write_text("usage\n", encoding="utf-8")
     (tmp_path / "tools" / "role_ops.py").write_text("", encoding="utf-8")
     (tmp_path / "tools" / "memory.py").write_text("", encoding="utf-8")
     (tmp_path / "tools" / "context_router.py").write_text("", encoding="utf-8")
@@ -138,14 +138,14 @@ def test_publish_skill_writes_repo_publish_directory(tmp_path, monkeypatch):
 
 
 def test_build_script_runs_publish_when_executed_directly(tmp_path, monkeypatch):
-    (tmp_path / "skill" / "agents").mkdir(parents=True)
-    (tmp_path / "skill" / "references").mkdir(parents=True)
+    (tmp_path / "bundle" / "agents").mkdir(parents=True)
+    (tmp_path / "bundle" / "references").mkdir(parents=True)
     (tmp_path / "tools").mkdir()
     (tmp_path / "templates" / "persona").mkdir(parents=True)
 
-    (tmp_path / "skill" / "SKILL.md").write_text("---\nname: roleme\n---\n", encoding="utf-8")
-    (tmp_path / "skill" / "agents" / "openai.yaml").write_text("name: roleMe\n", encoding="utf-8")
-    (tmp_path / "skill" / "references" / "usage.md").write_text("usage\n", encoding="utf-8")
+    (tmp_path / "bundle" / "SKILL.md").write_text("---\nname: roleme\n---\n", encoding="utf-8")
+    (tmp_path / "bundle" / "agents" / "openai.yaml").write_text("name: roleMe\n", encoding="utf-8")
+    (tmp_path / "bundle" / "references" / "usage.md").write_text("usage\n", encoding="utf-8")
     (tmp_path / "tools" / "role_ops.py").write_text("", encoding="utf-8")
     (tmp_path / "tools" / "memory.py").write_text("", encoding="utf-8")
     (tmp_path / "tools" / "context_router.py").write_text("", encoding="utf-8")

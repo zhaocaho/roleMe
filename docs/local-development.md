@@ -6,7 +6,7 @@
 
 - `tools/`：最终 skill 运行时会带上的最小工具层。
 - `templates/`：初始化角色包时生成的模板。
-- `skill/`：最终要被打包分发的 skill 源定义。
+- `bundle/`：最终要被打包分发的 skill 源定义。
 - `scripts/`：只在源码仓库里使用的开发脚本，不进入最终产物。
 - `docs/`：仓库内部文档，不进入最终产物。
 
@@ -29,7 +29,7 @@ python -m pip install -e ".[dev]"
 
 1. 新建功能分支。
 2. 先补测试，再补最小实现。
-3. 优先把策略写进 `templates/AGENT.md` 或 `skill/SKILL.md`。
+3. 优先把策略写进 `templates/AGENT.md` 或 `bundle/SKILL.md`。
 4. 只有确定性的文件操作才写进 `tools/`。
 5. `scripts/` 只处理开发期构建、校验、迁移，不写运行时逻辑。
 
@@ -69,7 +69,7 @@ skills/roleme/
 - `agents/openai.yaml`
 - `tools/`
 - `assets/templates/`
-- `references/`（如果 `skill/references/` 存在）
+- `references/`（如果 `bundle/references/` 存在）
 
 当前发布产物默认不包含：
 
@@ -80,5 +80,5 @@ skills/roleme/
 ## 文档约定
 
 - 仓库内部文档放在 `docs/`
-- 最终用户需要随 skill 一起分发的说明放在 `skill/references/`
-- `skill/SKILL.md` 只保留高层入口和规则，细节说明放到 `skill/references/usage.md`
+- 最终用户需要随 skill 一起分发的说明放在 `bundle/references/`
+- `bundle/SKILL.md` 只保留高层入口和规则，细节说明放到 `bundle/references/usage.md`
