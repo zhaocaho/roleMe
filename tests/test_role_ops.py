@@ -657,9 +657,13 @@ def test_parse_workflow_archive_response_returns_typed_plan():
             "kind": "general",
             "project_title": None,
             "project_slug": None,
+            "workflow_slug": "general-collaboration",
             "workflow_title": "通用协作工作流",
+            "workflow_summary": "适合需要先设计再执行的任务",
+            "workflow_applies_to": "当用户需要先对齐工作方式、再进入执行时使用",
+            "workflow_keywords": ["协作", "设计", "执行"],
             "workflow_doc_markdown": "# 通用协作工作流\n\n先澄清场景，再开始执行。\n",
-            "context_summary_markdown": "## 适用场景\n\n适合需要先设计后执行的任务。\n",
+            "context_summary_markdown": "## 全局上下文\n\n用于沉淀通用协作流程。\n",
             "user_rules": ["先澄清场景，再开始执行"],
             "memory_summary": ["可复用流程应沉淀为通用工作方式"],
             "project_memory": [],
@@ -671,13 +675,39 @@ def test_parse_workflow_archive_response_returns_typed_plan():
         role_name=None,
         project_title=None,
         project_slug=None,
+        workflow_slug="general-collaboration",
         workflow_title="通用协作工作流",
+        workflow_summary="适合需要先设计再执行的任务",
+        workflow_applies_to="当用户需要先对齐工作方式、再进入执行时使用",
+        workflow_keywords=["协作", "设计", "执行"],
         workflow_doc_markdown="# 通用协作工作流\n\n先澄清场景，再开始执行。",
-        context_summary_markdown="## 适用场景\n\n适合需要先设计后执行的任务。",
+        context_summary_markdown="## 全局上下文\n\n用于沉淀通用协作流程。",
         user_rules=["先澄清场景，再开始执行"],
         memory_summary=["可复用流程应沉淀为通用工作方式"],
         project_memory=[],
     )
+
+
+def test_parse_workflow_archive_response_derives_routable_defaults_for_legacy_payload():
+    plan = parse_workflow_archive_response(
+        {
+            "kind": "project",
+            "project_title": "roleMe",
+            "project_slug": "roleme",
+            "workflow_title": "roleMe 项目工作流",
+            "workflow_doc_markdown": "# roleMe 项目工作流\n\n先确认角色边界，再设计能力。\n",
+            "context_summary_markdown": "## 项目上下文\n\n该项目聚焦角色包与工作流沉淀。\n",
+            "user_rules": [],
+            "memory_summary": [],
+            "project_memory": [],
+        }
+    )
+
+    assert plan.workflow_slug == "roleme-项目工作流"
+    assert plan.workflow_summary == "该项目聚焦角色包与工作流沉淀。"
+    assert plan.workflow_applies_to == "该项目聚焦角色包与工作流沉淀。"
+    assert "roleme" in plan.workflow_keywords
+    assert "项目工作流" in plan.workflow_keywords
 
 
 def test_sanitize_archived_markdown_rejects_instructional_content():
@@ -720,9 +750,13 @@ def test_archive_general_workflow_writes_topic_index_and_memory_promotions(
             "role_name": "self",
             "project_title": None,
             "project_slug": None,
+            "workflow_slug": "general-collaboration",
             "workflow_title": "通用协作工作流",
+            "workflow_summary": "适合需要先设计再执行的任务",
+            "workflow_applies_to": "当用户需要先对齐工作方式、再进入执行时使用",
+            "workflow_keywords": ["协作", "设计", "执行"],
             "workflow_doc_markdown": "# 通用协作工作流\n\n先澄清场景，再开始执行。\n",
-            "context_summary_markdown": "## 适用场景\n\n适合需要先设计后执行的任务。\n",
+            "context_summary_markdown": "## 全局上下文\n\n用于沉淀通用协作流程。\n",
             "user_rules": ["先澄清场景，再开始执行"],
             "memory_summary": ["可复用流程应沉淀为通用工作方式"],
             "project_memory": [],
@@ -732,9 +766,10 @@ def test_archive_general_workflow_writes_topic_index_and_memory_promotions(
     result = archive_general_workflow(plan)
     role_path = get_current_role_state().role_path
 
-    assert "brain/topics/general-workflow.md" in result.written_paths
+    assert "brain/workflows/general-collaboration.md" in result.written_paths
+    assert "brain/workflows/index.md" in result.written_paths
     assert "memory/USER.md" in result.written_paths
-    assert "通用协作工作流" in (
+    assert "- 工作流索引: workflows/index.md" in (
         Path(role_path) / "brain" / "index.md"
     ).read_text(encoding="utf-8")
     assert "- 先澄清场景，再开始执行" in (
@@ -753,9 +788,13 @@ def test_archive_project_workflow_writes_project_assets_and_is_rediscoverable(
             "role_name": "self",
             "project_title": "roleMe",
             "project_slug": "roleme",
+            "workflow_slug": "requirements",
             "workflow_title": "roleMe 项目工作流",
+            "workflow_summary": "用于把模糊需求整理成可规划输入",
+            "workflow_applies_to": "当用户想梳理需求、澄清范围、整理用户故事时使用",
+            "workflow_keywords": ["需求", "requirement", "scope"],
             "workflow_doc_markdown": "# roleMe 项目工作流\n\n先确认角色边界，再设计能力。\n",
-            "context_summary_markdown": "## 项目上下文\n\n该项目聚焦角色包与工作流沉淀。\n\n- Workflow: workflow.md\n",
+            "context_summary_markdown": "# roleMe\n\n该项目聚焦角色包与工作流沉淀。\n",
             "user_rules": [],
             "memory_summary": [],
             "project_memory": ["先确认角色边界，再设计能力"],
@@ -769,8 +808,13 @@ def test_archive_project_workflow_writes_project_assets_and_is_rediscoverable(
         max_brain_depth=1,
     )
 
-    assert "projects/roleme/workflow.md" in result.written_paths
-    assert "projects/roleme/workflow.md" in discovered
+    assert "projects/roleme/workflows/index.md" in result.written_paths
+    assert "projects/roleme/workflows/requirements.md" in result.written_paths
+    assert "projects/roleme/context.md" in result.written_paths
+    assert "projects/roleme/context.md" in discovered
     assert "- 先确认角色边界，再设计能力" in (
         role_path / "projects" / "roleme" / "memory.md"
+    ).read_text(encoding="utf-8")
+    assert "- 工作流索引: workflows/index.md" in (
+        role_path / "projects" / "roleme" / "context.md"
     ).read_text(encoding="utf-8")

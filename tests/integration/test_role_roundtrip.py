@@ -367,9 +367,13 @@ def test_role_roundtrip_archives_general_workflow_and_reloads_snapshot_notice(
             "role_name": "self",
             "project_title": None,
             "project_slug": None,
+            "workflow_slug": "general-collaboration",
             "workflow_title": "通用协作工作流",
+            "workflow_summary": "适合需要先设计再执行的任务",
+            "workflow_applies_to": "当用户需要先对齐工作方式、再进入执行时使用",
+            "workflow_keywords": ["协作", "设计", "执行"],
             "workflow_doc_markdown": "# 通用协作工作流\n\n先澄清场景，再开始执行。\n",
-            "context_summary_markdown": "## 适用场景\n\n适合需要先设计后执行的任务。\n",
+            "context_summary_markdown": "## 全局上下文\n\n用于沉淀通用协作流程。\n",
             "user_rules": ["先澄清场景，再开始执行"],
             "memory_summary": ["可复用流程应沉淀为通用工作方式"],
             "project_memory": [],
@@ -378,5 +382,6 @@ def test_role_roundtrip_archives_general_workflow_and_reloads_snapshot_notice(
 
     result = archive_general_workflow(plan)
 
+    assert "brain/workflows/general-collaboration.md" in result.written_paths
     assert "memory/MEMORY.md" in result.written_paths
     assert result.requires_reload is True
