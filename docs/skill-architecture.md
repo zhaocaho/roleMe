@@ -48,7 +48,7 @@
 
 ### 入口层
 
-- `bundle/SKILL.md`
+- `bundle/SKILL.template.md`
 - 角色包内的 `AGENT.md`
 
 两者共同定义“宿主如何使用这个 skill”与“角色如何在会话中工作”。

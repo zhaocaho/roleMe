@@ -29,7 +29,7 @@ python -m pip install -e ".[dev]"
 
 1. 新建功能分支。
 2. 先补测试，再补最小实现。
-3. 优先把策略写进 `templates/AGENT.md` 或 `bundle/SKILL.md`。
+3. 优先把策略写进 `templates/AGENT.md` 或 `bundle/SKILL.template.md`。
 4. 只有确定性的文件操作才写进 `tools/`。
 5. `scripts/` 只处理开发期构建、校验、迁移，不写运行时逻辑。
 
@@ -81,4 +81,4 @@ skills/roleme/
 
 - 仓库内部文档放在 `docs/`
 - 最终用户需要随 skill 一起分发的说明放在 `bundle/references/`
-- `bundle/SKILL.md` 只保留高层入口和规则，细节说明放到 `bundle/references/usage.md`
+- `bundle/SKILL.template.md` 只保留高层入口和规则，细节说明放到 `bundle/references/usage.md`

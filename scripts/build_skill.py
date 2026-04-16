@@ -12,6 +12,10 @@ def skill_source_dir() -> str:
     return "bundle"
 
 
+def skill_template_filename() -> str:
+    return "SKILL.template.md"
+
+
 def _ignore_runtime_artifacts(_directory: str, names: list[str]) -> set[str]:
     ignored: set[str] = set()
     for name in names:
@@ -27,6 +31,7 @@ def build_skill(output_root: Path) -> Path:
         shutil.rmtree(destination)
 
     shutil.copytree(root / skill_source_dir(), destination)
+    (destination / skill_template_filename()).replace(destination / "SKILL.md")
     shutil.copytree(
         root / "tools",
         destination / "tools",
