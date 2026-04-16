@@ -1,4 +1,4 @@
-# roleMe Packaged Workflows Index 设计文档
+# roleMe 打包产物工作流索引设计文档
 
 日期：2026-04-16  
 状态：已完成设计评审，待实现规划
@@ -145,7 +145,7 @@ projects/
 每个 workflow 以一个独立 section 表示，格式如下：
 
 ```markdown
-# Workflows Index
+# 工作流索引
 
 ## requirements
 - title: 需求分析 workflow
@@ -337,6 +337,149 @@ workflow 目录只承载真正形成独立流程的内容。
 - `projects/<project-slug>/workflow.md`
 - `brain/topics/general-workflow.md`
 - 任何基于旧路径的 fallback 逻辑
+
+## 结合现有代码的合理性评估
+
+本设计在现有代码基础上是合理的，但不是“只改几个路径”的轻量调整，而是一次围绕 workflow 数据模型、索引写入和路由发现的结构性改造。
+
+当前代码的主要约束如下。
+
+### 一、归档数据模型还不够支撑新结构
+
+`tools/role_ops.py` 中的 `WorkflowArchivePlan` 目前只有：
+
+- `workflow_title`
+- `workflow_doc_markdown`
+- `context_summary_markdown`
+
+它还没有以下信息：
+
+- `workflow_slug`
+- workflow 索引条目字段
+- 工作流目标文件名
+
+这意味着当前归档逻辑只能把 workflow 当作“单份正文 + 一段摘要”处理，还不能稳定表达“一个 workflow 对应一个独立文件 + 一个索引注册项”。
+
+因此，本设计要落地，必须先扩展归档契约，而不是只改写入路径。
+
+### 二、现有索引写入工具只适合简单链接，不适合 workflow 注册表
+
+当前 `upsert_markdown_index_entry()` 写入的是：
+
+```text
+- 标签: 路径
+  - 摘要
+```
+
+这类简单列表足够支撑 `brain/index.md` 或 `projects/index.md` 的普通入口，但不够支撑 `workflows/index.md` 的注册表职责，因为新结构要求索引条目至少具备：
+
+- slug
+- title
+- file
+- applies_to
+- keywords
+- summary
+
+如果继续复用现有 helper，会出现两个问题：
+
+- 不能稳定更新同一个 workflow 条目
+- 不能支持路由器读取结构化字段做打分
+
+因此，本设计是合理的，但实现上应新增面向 workflow 的专用 index 读写函数，而不是继续复用普通索引 helper。
+
+### 三、当前 workflow 写入逻辑会覆盖单一旧文件
+
+当前：
+
+- `archive_general_workflow()` 固定写 `brain/topics/general-workflow.md`
+- `archive_project_workflow()` 固定写 `projects/<slug>/workflow.md`
+
+并且项目级写入时，会把 `context_summary_markdown` 直接写回 `context.md`，再补一句 `- Workflow: workflow.md`。
+
+这套逻辑和新设计的冲突点非常直接：
+
+- 它天然只能维护一个项目总 workflow 文件
+- 也天然只能维护一个全局总 workflow 文件
+- `context.md` 被当成 workflow 入口和摘要混合页，不符合新结构的职责边界
+
+所以旧写法不能平移到新目录，必须把“workflow 正文写入”“workflow 索引写入”“context 入口维护”拆成三个独立动作。
+
+### 四、当前路由逻辑仍然硬编码旧文件路径
+
+`tools/context_router.py` 当前的 workflow 发现逻辑仍然建立在这些假设上：
+
+- 项目级 workflow 命中 `workflow-<intent>.md` 或 `workflow.md`
+- 全局 workflow 命中 `brain/topics/general-workflow-<intent>.md` 或 `brain/topics/general-workflow.md`
+
+这说明现有实现虽然已经有了“意图路由”的方向，但仍然没有真正切到“索引驱动”。
+
+新设计要落地，至少需要新增三类能力：
+
+- 解析 `workflows/index.md`
+- 对索引条目做打分和选优
+- 根据索引中的 `file` 字段定位目标 workflow 文件
+
+也就是说，当前代码方向与本设计并不冲突，但需要从“固定路径选择”升级到“索引条目选择”。
+
+### 五、测试改动面会比较大，但集中且可控
+
+当前测试对旧结构绑定很深，尤其体现在：
+
+- `tests/test_context_router.py`
+- `tests/test_role_ops.py`
+- `tests/integration/test_role_roundtrip.py`
+
+这些测试大量断言以下旧路径：
+
+- `projects/<slug>/workflow.md`
+- `brain/topics/general-workflow.md`
+- `brain/topics/general-workflow-<intent>.md`
+
+这意味着直接切换策略会让现有 workflow 相关测试大面积失效。
+
+但这并不代表设计不合理，反而说明“旧行为集中在少数核心函数和测试假设里”，改造边界是清楚的。只要实现时同步更新：
+
+- 归档契约
+- index 读写
+- 路由发现
+- 测试样例数据
+
+这次切换是可控的，不需要做长期兼容层。
+
+### 六、打包产物同步风险低于运行时改造风险
+
+`scripts/build_skill.py` 当前只是复制：
+
+- `bundle/`
+- `tools/`
+- `templates/`
+
+这意味着打包脚本本身不复杂。
+
+只要开发仓库中的以下内容改对：
+
+- `bundle/SKILL.template.md`
+- `bundle/references/usage.md`
+- `tools/context_router.py`
+- `tools/role_ops.py`
+
+打包产物就会自然继承新结构。
+
+因此，本设计真正的风险重点不在打包脚本，而在运行时契约与测试迁移。
+
+### 七、整体判断
+
+综合现有代码看，本设计是合理的，原因有三点：
+
+- 当前 workflow 逻辑已经集中在少数核心函数中，具备一次性切换的条件
+- 旧结构本身就是单文件聚合模型，继续叠补丁只会让后续演化更难
+- 打包产物采用复制式构建，只要源代码契约统一，发布产物就能同步受益
+
+但本设计也明确意味着：
+
+- 不能把这次改造当成简单路径替换
+- 必须把归档契约、索引模型、路由发现和测试一起改
+- 计划阶段需要显式拆出“数据结构重塑”和“测试迁移”任务
 
 ## 打包产物要求
 
