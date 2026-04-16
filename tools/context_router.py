@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 
 from tools.memory import build_frozen_snapshot
+from tools.workflow_index import WorkflowIndexEntry, parse_workflow_index
 
 
 PROJECT_HINTS = {
@@ -31,62 +32,10 @@ DOMAIN_HINTS = {
     "领域",
     "知识",
 }
-WORKFLOW_REQUIREMENTS_ACTION_HINTS = {
-    "开始",
-    "梳理",
-    "澄清",
-    "拆解",
-    "分析",
-    "确认",
-}
-WORKFLOW_REQUIREMENTS_SUBJECT_HINTS = {
-    "需求",
-    "用户故事",
-    "story",
-    "stories",
-    "requirement",
-    "requirements",
-    "scope",
-}
-WORKFLOW_BUGFIX_ACTION_HINTS = {
-    "修",
-    "修复",
-    "fix",
-    "fixed",
-    "解决",
-    "hotfix",
-}
-WORKFLOW_BUGFIX_SUBJECT_HINTS = {
-    "bug",
-    "报错",
-    "异常",
-    "故障",
-    "缺陷",
-    "error",
-    "errors",
-    "issue",
-}
-WORKFLOW_ANALYSIS_ACTION_HINTS = {
-    "分析",
-    "排查",
-    "定位",
-    "诊断",
-    "原因",
-    "为什么",
-    "why",
-}
-WORKFLOW_ANALYSIS_SUBJECT_HINTS = {
-    "问题",
-    "报错",
-    "异常",
-    "故障",
-    "失败",
-    "bug",
-    "error",
-    "issue",
-}
 PATH_PATTERN = re.compile(r"([A-Za-z0-9_./-]+\.md)")
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]+")
+CJK_RUN_PATTERN = re.compile(r"[\u4e00-\u9fff]+")
+ASCII_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+")
 
 
 @dataclass(frozen=True)
@@ -111,10 +60,6 @@ def _extract_markdown_paths(text: str) -> list[str]:
 def _score_text(query_tokens: set[str], text: str) -> int:
     text_tokens = _tokenize(text)
     return len(query_tokens & text_tokens)
-
-
-def _contains_any(text: str, hints: set[str]) -> bool:
-    return any(hint in text for hint in hints)
 
 
 def _slugify(value: str) -> str:
@@ -163,27 +108,6 @@ def _resolve_current_project_slug(role_path: Path, query: str) -> str | None:
         return existing_slugs[0]
 
     return _resolve_query_project_slug(role_path, query)
-
-
-def _detect_workflow_intent(query: str) -> str | None:
-    normalized = query.casefold()
-
-    if _contains_any(normalized, WORKFLOW_BUGFIX_ACTION_HINTS) and _contains_any(
-        normalized, WORKFLOW_BUGFIX_SUBJECT_HINTS
-    ):
-        return "bugfix"
-
-    if _contains_any(normalized, WORKFLOW_REQUIREMENTS_SUBJECT_HINTS) and _contains_any(
-        normalized, WORKFLOW_REQUIREMENTS_ACTION_HINTS
-    ):
-        return "requirements"
-
-    if _contains_any(normalized, WORKFLOW_ANALYSIS_ACTION_HINTS) and _contains_any(
-        normalized, WORKFLOW_ANALYSIS_SUBJECT_HINTS
-    ):
-        return "analysis"
-
-    return None
 
 
 def _resolve_brain_path(role_path: Path, relative_path: str) -> tuple[str, Path]:
@@ -314,72 +238,104 @@ def _is_nonempty_file(path: Path) -> bool:
     return path.exists() and path.is_file() and bool(path.read_text(encoding="utf-8").strip())
 
 
-def _select_existing_path(role_path: Path, candidates: list[str]) -> str | None:
-    for candidate in candidates:
-        if _is_nonempty_file(role_path / candidate):
-            return candidate
-    return None
+def _workflow_signal_terms(text: str) -> set[str]:
+    normalized = text.casefold()
+    terms = {token for token in ASCII_TOKEN_PATTERN.findall(normalized) if token}
+    for run in CJK_RUN_PATTERN.findall(normalized):
+        if len(run) == 1:
+            terms.add(run)
+            continue
+        for index in range(len(run) - 1):
+            terms.add(run[index : index + 2])
+    return terms
 
 
-def _discover_project_workflow_paths(role_path: Path, project_slug: str, intent: str) -> list[str]:
-    context_relative = f"projects/{project_slug}/context.md"
-    if not _is_nonempty_file(role_path / context_relative):
+def _score_workflow_entry(query_terms: set[str], entry: WorkflowIndexEntry) -> int:
+    keyword_terms: set[str] = set()
+    for keyword in entry.keywords:
+        keyword_terms.update(_workflow_signal_terms(keyword))
+
+    score = 2 * len(query_terms & _workflow_signal_terms(entry.applies_to))
+    score += len(query_terms & keyword_terms)
+    score += len(query_terms & _workflow_signal_terms(entry.title))
+    score += len(query_terms & _workflow_signal_terms(Path(entry.file).stem.replace("-", " ")))
+    return score
+
+
+def _select_workflow_entry(query: str, entries: list[WorkflowIndexEntry]) -> WorkflowIndexEntry | None:
+    query_terms = _workflow_signal_terms(query)
+    if not query_terms:
+        return None
+
+    ranked = sorted(
+        ((entry, _score_workflow_entry(query_terms, entry)) for entry in entries),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    if not ranked or ranked[0][1] < 4:
+        return None
+    if len(ranked) > 1 and ranked[0][1] - ranked[1][1] < 5:
+        return None
+    return ranked[0][0]
+
+
+def _discover_workflow_paths_from_index(role_path: Path, index_relative: str, query: str) -> list[str]:
+    index_path = role_path / index_relative
+    if not _is_nonempty_file(index_path):
         return []
 
-    workflow_relative = _select_existing_path(
-        role_path,
-        [
-            f"projects/{project_slug}/workflow-{intent}.md",
-            f"projects/{project_slug}/workflow.md",
-        ],
+    entry = _select_workflow_entry(
+        query,
+        parse_workflow_index(index_path.read_text(encoding="utf-8")),
     )
-    if workflow_relative is None:
+    if entry is None:
+        return []
+
+    workflow_relative = f"{Path(index_relative).parent.as_posix()}/{entry.file}"
+    if not _is_nonempty_file(role_path / workflow_relative):
+        return []
+    return [index_relative, workflow_relative]
+
+
+def _discover_project_workflow_paths(role_path: Path, project_slug: str, query: str) -> list[str]:
+    workflow_bundle = _discover_workflow_paths_from_index(
+        role_path,
+        f"projects/{project_slug}/workflows/index.md",
+        query,
+    )
+    if not workflow_bundle:
         return []
 
     discovered: list[str] = []
     if _is_nonempty_file(role_path / "projects/index.md"):
         discovered.append("projects/index.md")
-    discovered.extend([context_relative, workflow_relative])
-
-    for linked in _follow_same_directory_markdown_links(role_path, workflow_relative)[:1]:
-        if linked not in discovered:
-            discovered.append(linked)
+    context_relative = f"projects/{project_slug}/context.md"
+    if _is_nonempty_file(role_path / context_relative):
+        discovered.append(context_relative)
+    discovered.extend(workflow_bundle)
     return discovered
 
 
-def _discover_global_workflow_paths(role_path: Path, intent: str) -> list[str]:
-    workflow_relative = _select_existing_path(
-        role_path,
-        [
-            f"brain/topics/general-workflow-{intent}.md",
-            "brain/topics/general-workflow.md",
-        ],
-    )
-    if workflow_relative is None:
+def _discover_global_workflow_paths(role_path: Path, query: str) -> list[str]:
+    workflow_bundle = _discover_workflow_paths_from_index(role_path, "brain/workflows/index.md", query)
+    if not workflow_bundle:
         return []
 
     discovered: list[str] = []
     if _is_nonempty_file(role_path / "brain/index.md"):
         discovered.append("brain/index.md")
-    discovered.append(workflow_relative)
-    for linked in _follow_same_directory_markdown_links(role_path, workflow_relative)[:1]:
-        if linked not in discovered:
-            discovered.append(linked)
+    discovered.extend(workflow_bundle)
     return discovered
 
 
 def discover_workflow_paths(role_path: Path, query: str) -> list[str]:
-    intent = _detect_workflow_intent(query)
-    if intent is None:
-        return []
-
     project_slug = _resolve_current_project_slug(role_path, query)
     if project_slug:
-        project_paths = _discover_project_workflow_paths(role_path, project_slug, intent)
+        project_paths = _discover_project_workflow_paths(role_path, project_slug, query)
         if project_paths:
             return project_paths
 
-    return _discover_global_workflow_paths(role_path, intent)
+    return _discover_global_workflow_paths(role_path, query)
 
 
 def discover_project_paths(role_path: Path, query: str) -> list[str]:

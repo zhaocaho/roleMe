@@ -144,53 +144,7 @@ def test_discover_project_paths_follows_context_workflow_link_one_hop(tmp_role_h
     ]
 
 
-def test_discover_context_paths_prefers_current_project_workflow_from_nested_subdirectory(
-    tmp_role_home,
-    tmp_path,
-    monkeypatch,
-):
-    role_path = initialize_role("self", skill_version="0.1.0")
-    repo_root = tmp_path / "roleMe"
-    repo_root.mkdir()
-    (repo_root / ".git").mkdir()
-    nested_dir = repo_root / "packages" / "ui"
-    nested_dir.mkdir(parents=True)
-    monkeypatch.chdir(nested_dir)
-
-    project_dir = role_path / "projects" / "roleme"
-    project_dir.mkdir(parents=True, exist_ok=True)
-    (role_path / "projects" / "index.md").write_text(
-        "# 项目索引\n\n- roleMe: projects/roleme/context.md\n",
-        encoding="utf-8",
-    )
-    (project_dir / "context.md").write_text(
-        "# roleMe\n\n项目摘要。\n",
-        encoding="utf-8",
-    )
-    (project_dir / "workflow-requirements.md").write_text(
-        "# roleMe Requirements Workflow\n\n## 适用任务\n\n开始需求、梳理需求。\n",
-        encoding="utf-8",
-    )
-    (role_path / "brain" / "topics").mkdir(parents=True, exist_ok=True)
-    (role_path / "brain" / "index.md").write_text(
-        "# 知识索引\n\n- 通用需求工作流: topics/general-workflow-requirements.md\n",
-        encoding="utf-8",
-    )
-    (role_path / "brain" / "topics" / "general-workflow-requirements.md").write_text(
-        "# 通用需求工作流\n\n## 适用任务\n\n开始需求、拆解目标。\n",
-        encoding="utf-8",
-    )
-
-    result = discover_context_paths(role_path, query="开始需求")
-
-    assert result == [
-        "projects/index.md",
-        "projects/roleme/context.md",
-        "projects/roleme/workflow-requirements.md",
-    ]
-
-
-def test_discover_context_paths_falls_back_to_project_generic_workflow_for_intent(
+def test_discover_context_paths_prefers_project_workflow_index_entry(
     tmp_role_home,
     tmp_path,
     monkeypatch,
@@ -201,55 +155,73 @@ def test_discover_context_paths_falls_back_to_project_generic_workflow_for_inten
     (repo_root / ".git").mkdir()
     monkeypatch.chdir(repo_root)
 
-    project_dir = role_path / "projects" / "roleme"
-    project_dir.mkdir(parents=True, exist_ok=True)
     (role_path / "projects" / "index.md").write_text(
         "# 项目索引\n\n- roleMe: projects/roleme/context.md\n",
         encoding="utf-8",
     )
-    (project_dir / "context.md").write_text("# roleMe\n\n项目摘要。\n", encoding="utf-8")
-    (project_dir / "workflow.md").write_text(
-        "# roleMe Workflow\n\n项目通用流程。\n",
+    project_root = role_path / "projects" / "roleme"
+    project_dir = project_root / "workflows"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (project_root / "context.md").write_text(
+        "# roleMe\n\n项目摘要。\n\n- 参考知识: brain/topics/ai-product.md\n",
         encoding="utf-8",
     )
-    (role_path / "brain" / "topics").mkdir(parents=True, exist_ok=True)
-    (role_path / "brain" / "index.md").write_text(
-        "# 知识索引\n\n- 通用需求工作流: topics/general-workflow-requirements.md\n",
+    (project_dir / "index.md").write_text(
+        "# 工作流索引\n\n"
+        "## requirements\n"
+        "- title: 需求分析 workflow\n"
+        "- file: requirements.md\n"
+        "- applies_to: 当用户想梳理需求、澄清范围、整理用户故事时使用\n"
+        "- keywords: 需求, requirement, scope\n"
+        "- summary: 用于把模糊需求整理成可规划输入\n",
         encoding="utf-8",
     )
-    (role_path / "brain" / "topics" / "general-workflow-requirements.md").write_text(
-        "# 通用需求工作流\n\n## 适用任务\n\n开始需求、拆解目标。\n",
+    (project_dir / "requirements.md").write_text(
+        "# 需求分析 workflow\n\n先澄清边界，再整理故事。\n",
         encoding="utf-8",
     )
 
-    result = discover_context_paths(role_path, query="开始需求")
+    result = discover_context_paths(role_path, query="开始梳理这个需求")
 
     assert result == [
         "projects/index.md",
         "projects/roleme/context.md",
-        "projects/roleme/workflow.md",
+        "projects/roleme/workflows/index.md",
+        "projects/roleme/workflows/requirements.md",
     ]
 
 
-def test_discover_context_paths_falls_back_to_global_workflow_when_project_missing(
+def test_discover_context_paths_falls_back_to_global_workflow_index_when_project_missing(
     tmp_role_home,
 ):
     role_path = initialize_role("self", skill_version="0.1.0")
-    (role_path / "brain" / "topics").mkdir(parents=True, exist_ok=True)
     (role_path / "brain" / "index.md").write_text(
-        "# 知识索引\n\n- 通用需求工作流: topics/general-workflow-requirements.md\n",
+        "# 知识索引\n\n- 工作流索引: workflows/index.md\n",
         encoding="utf-8",
     )
-    (role_path / "brain" / "topics" / "general-workflow-requirements.md").write_text(
-        "# 通用需求工作流\n\n## 适用任务\n\n开始需求、拆解目标。\n",
+    workflows_dir = role_path / "brain" / "workflows"
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+    (workflows_dir / "index.md").write_text(
+        "# 工作流索引\n\n"
+        "## analysis\n"
+        "- title: 问题分析 workflow\n"
+        "- file: analysis.md\n"
+        "- applies_to: 当用户想分析问题、排查原因、理解异常时使用\n"
+        "- keywords: 分析, 排查, 诊断, why\n"
+        "- summary: 用于定位问题和形成分析结论\n",
+        encoding="utf-8",
+    )
+    (workflows_dir / "analysis.md").write_text(
+        "# 问题分析 workflow\n\n先复述问题，再定位原因。\n",
         encoding="utf-8",
     )
 
-    result = discover_context_paths(role_path, query="开始需求")
+    result = discover_context_paths(role_path, query="帮我分析这个异常原因")
 
     assert result == [
         "brain/index.md",
-        "brain/topics/general-workflow-requirements.md",
+        "brain/workflows/index.md",
+        "brain/workflows/analysis.md",
     ]
 
 
@@ -271,11 +243,57 @@ def test_discover_context_paths_does_not_inject_workflow_for_low_confidence_requ
         encoding="utf-8",
     )
     (project_dir / "context.md").write_text("# roleMe\n\n项目摘要。\n", encoding="utf-8")
-    (project_dir / "workflow.md").write_text("# roleMe Workflow\n\n项目通用流程。\n", encoding="utf-8")
+    workflows_dir = project_dir / "workflows"
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+    (workflows_dir / "index.md").write_text(
+        "# 工作流索引\n\n"
+        "## requirements\n"
+        "- title: 需求分析 workflow\n"
+        "- file: requirements.md\n"
+        "- applies_to: 当用户想梳理需求、澄清范围、整理用户故事时使用\n"
+        "- keywords: 需求, requirement, scope\n"
+        "- summary: 用于把模糊需求整理成可规划输入\n",
+        encoding="utf-8",
+    )
+    (workflows_dir / "requirements.md").write_text(
+        "# 需求分析 workflow\n\n先澄清边界，再整理故事。\n",
+        encoding="utf-8",
+    )
 
     result = discover_context_paths(role_path, query="读一下这个文件")
 
-    assert "projects/roleme/workflow.md" not in result
+    assert "projects/roleme/workflows/index.md" not in result
+    assert "projects/roleme/workflows/requirements.md" not in result
+
+
+def test_discover_context_paths_does_not_inject_ambiguous_workflow_entries(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    workflows_dir = role_path / "brain" / "workflows"
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+    (workflows_dir / "index.md").write_text(
+        "# 工作流索引\n\n"
+        "## analysis\n"
+        "- title: 分析 workflow\n"
+        "- file: analysis.md\n"
+        "- applies_to: 分析问题和定位原因\n"
+        "- keywords: 分析, 原因\n"
+        "- summary: 用于分析问题\n\n"
+        "## diagnose\n"
+        "- title: 诊断 workflow\n"
+        "- file: diagnose.md\n"
+        "- applies_to: 诊断问题和定位原因\n"
+        "- keywords: 诊断, 原因\n"
+        "- summary: 用于诊断问题\n",
+        encoding="utf-8",
+    )
+    (workflows_dir / "analysis.md").write_text("# 分析\n\n内容。\n", encoding="utf-8")
+    (workflows_dir / "diagnose.md").write_text("# 诊断\n\n内容。\n", encoding="utf-8")
+
+    result = discover_context_paths(role_path, query="分析这个原因")
+
+    assert "brain/workflows/index.md" not in result
+    assert "brain/workflows/analysis.md" not in result
+    assert "brain/workflows/diagnose.md" not in result
 
 
 def test_build_context_snapshot_combines_resident_and_discovered_context(tmp_role_home):
