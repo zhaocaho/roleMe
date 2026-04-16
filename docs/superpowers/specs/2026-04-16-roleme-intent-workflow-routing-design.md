@@ -220,9 +220,18 @@ brain/topics/
 
 ### 一、当前项目识别
 
-优先使用当前 `cwd` 对应的 Git 仓库根目录来推断当前项目身份。
+优先从当前 `cwd` 开始向上逐级查找 Git 仓库根目录，再用该仓库根目录来推断当前项目身份。
 
-如果当前仓库能映射到角色包里的 `projects/<slug>/`，则视为当前活动项目。
+这意味着用户即使当前停留在：
+
+- `src/`
+- `packages/*`
+- `apps/*`
+- 任意仓库子目录
+
+也应先回溯到同一个仓库根目录，再映射到角色包中的项目目录。
+
+如果找到的当前仓库能映射到角色包里的 `projects/<slug>/`，则视为当前活动项目。
 
 如果无法从 `cwd` 推断，则回退到现有项目发现逻辑：
 
@@ -258,21 +267,31 @@ v1 支持三类意图族：
 
 如果某一级不存在，继续回退。
 
-如果 query 没能稳定归因到某个意图族，但明显属于“开始做事”的协作请求，则仍允许直接命中：
+如果 query 没能稳定归因到某个意图族，则 v1 不因“语气像在开工”就自动注入通用 workflow。
 
-1. `projects/<slug>/workflow.md`
-2. `brain/topics/general-workflow.md`
+此时应回退到普通项目 / brain / memory 发现逻辑，而不是仅凭祈使句或任务口吻自动选择 `projects/<slug>/workflow.md` 或 `brain/topics/general-workflow.md`。
+
+这条限制的目的，是避免“读一下这个文件”“改个文案”“看下这个配置”这类普通执行请求被误判成 workflow 型任务。
 
 ### 四、渐进式披露策略
 
 一旦选中了目标 workflow 文件：
 
 - 将该 workflow 视为当前 query 的主流程文档
-- 默认只把这一份 workflow 带入 discovered context
+- 若命中的是项目级 workflow，则应始终同时带入 `projects/<slug>/context.md` 作为项目摘要与术语边界
+- 默认带入的核心 discovered context 为：
+  - `projects/index.md`
+  - `projects/<slug>/context.md`
+  - 选中的 `workflow*.md`
 - 如该 workflow 文档中存在同目录下的一跳链接，可继续跟进一个补充文档
 - 不自动把同项目下其他 workflow 文件一并带入
 
-这保证当前上下文既能拿到流程，又不会被多个阶段文档稀释。
+如果命中的是全局 workflow，则核心 discovered context 为：
+
+- `brain/index.md`
+- 选中的 `general-workflow*.md`
+
+这保证当前上下文既有项目摘要和流程正文，又不会被多个阶段文档稀释。
 
 ## 对现有发现逻辑的影响
 
@@ -294,7 +313,7 @@ v1 支持三类意图族：
 本设计建议新增一层更细的 workflow 路由：
 
 1. 先做粗粒度路由，判断是否应进入项目上下文
-2. 如果进入项目上下文，再尝试基于当前项目和 query 意图选择具体 workflow
+2. 如果进入项目上下文，再尝试基于当前项目和 query 意图选择具体 workflow，并与 `context.md` 组成同一次 discovered bundle
 3. 如果项目侧未命中，再回退到全局 workflow
 4. 最后再视情况补充 `brain` 主题或其他 discovered 文档
 
@@ -315,6 +334,7 @@ v1 支持三类意图族：
 - 若当前角色未加载，保持现有行为，不尝试做 workflow 路由
 - 若当前项目无法识别，则不阻塞回答，直接尝试全局 workflow 回退
 - 若对应 intent 的 workflow 文件不存在，则自动回退到通用 workflow
+- 若 query 没有形成足够稳定的 intent 信号，则不自动注入任何通用 workflow
 - 若 workflow 文件存在但内容为空或过短，则视为无效候选并继续回退
 - 若多个候选分数相近，则按固定优先级优先选择项目侧文件，避免结果漂移
 
@@ -325,6 +345,7 @@ v1 支持三类意图族：
 - 当前 `cwd` 对应 `roleme` 项目，query 为“开始需求”，命中 `projects/roleme/workflow-requirements.md`
 - 当前 `cwd` 对应 `roleme` 项目，query 为“帮我分析下这个问题”，命中 `projects/roleme/workflow-analysis.md`
 - 当前 `cwd` 对应 `roleme` 项目，query 为“修一下这个 bug”，命中 `projects/roleme/workflow-bugfix.md`
+- 当前 `cwd` 位于 `roleme/src/` 或 `roleme/packages/ui/`，仍能回溯到仓库根目录并命中 `projects/roleme/workflow-<intent>.md`
 - 当前项目没有意图型 workflow 时，回退到 `projects/roleme/workflow.md`
 - 当前项目没有任何 workflow 时，回退到 `brain/topics/general-workflow-<intent>.md`
 - 项目 workflow 与全局 workflow 同时存在时，项目侧优先
@@ -333,11 +354,13 @@ v1 支持三类意图族：
 
 - 只有旧版 `workflow.md` 时，原有 query 仍可发现 workflow
 - 没有 workflow 文件时，不影响当前 `context.md` 和 `brain` 的发现逻辑
+- query 只是普通执行请求但缺少稳定 intent 时，不额外拉入通用 workflow
 - query 明显不是协作执行请求时，不额外拉入 workflow
 
 ### 渐进式披露测试
 
 - 命中需求 workflow 时，不应同时拉入 bugfix / analysis workflow
+- 命中项目 workflow 时，应同时保留 `projects/<slug>/context.md`
 - 被命中的 workflow 可以继续一跳发现同目录补充文档
 - context snapshot 中应包含 resident 与单一命中的 workflow discovered 内容
 

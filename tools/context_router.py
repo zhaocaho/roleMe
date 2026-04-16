@@ -31,6 +31,60 @@ DOMAIN_HINTS = {
     "领域",
     "知识",
 }
+WORKFLOW_REQUIREMENTS_ACTION_HINTS = {
+    "开始",
+    "梳理",
+    "澄清",
+    "拆解",
+    "分析",
+    "确认",
+}
+WORKFLOW_REQUIREMENTS_SUBJECT_HINTS = {
+    "需求",
+    "用户故事",
+    "story",
+    "stories",
+    "requirement",
+    "requirements",
+    "scope",
+}
+WORKFLOW_BUGFIX_ACTION_HINTS = {
+    "修",
+    "修复",
+    "fix",
+    "fixed",
+    "解决",
+    "hotfix",
+}
+WORKFLOW_BUGFIX_SUBJECT_HINTS = {
+    "bug",
+    "报错",
+    "异常",
+    "故障",
+    "缺陷",
+    "error",
+    "errors",
+    "issue",
+}
+WORKFLOW_ANALYSIS_ACTION_HINTS = {
+    "分析",
+    "排查",
+    "定位",
+    "诊断",
+    "原因",
+    "为什么",
+    "why",
+}
+WORKFLOW_ANALYSIS_SUBJECT_HINTS = {
+    "问题",
+    "报错",
+    "异常",
+    "故障",
+    "失败",
+    "bug",
+    "error",
+    "issue",
+}
 PATH_PATTERN = re.compile(r"([A-Za-z0-9_./-]+\.md)")
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]+")
 
@@ -57,6 +111,79 @@ def _extract_markdown_paths(text: str) -> list[str]:
 def _score_text(query_tokens: set[str], text: str) -> int:
     text_tokens = _tokenize(text)
     return len(query_tokens & text_tokens)
+
+
+def _contains_any(text: str, hints: set[str]) -> bool:
+    return any(hint in text for hint in hints)
+
+
+def _slugify(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", value.casefold()).strip("-")
+
+
+def _find_git_repo_root(start: Path | None = None) -> Path | None:
+    current = (start or Path.cwd()).resolve()
+    for candidate in [current, *current.parents]:
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def _list_project_slugs(role_path: Path) -> list[str]:
+    projects_dir = role_path / "projects"
+    if not projects_dir.exists():
+        return []
+    return sorted(path.name for path in projects_dir.iterdir() if path.is_dir())
+
+
+def _resolve_query_project_slug(role_path: Path, query: str) -> str | None:
+    if not any(hint in query.casefold() for hint in PROJECT_HINTS):
+        return None
+
+    for path in discover_project_paths(role_path, query):
+        if path.startswith("projects/") and path.endswith("/context.md"):
+            parts = path.split("/")
+            if len(parts) >= 3:
+                return parts[1]
+    return None
+
+
+def _resolve_current_project_slug(role_path: Path, query: str) -> str | None:
+    existing_slugs = _list_project_slugs(role_path)
+    if not existing_slugs:
+        return None
+
+    repo_root = _find_git_repo_root()
+    if repo_root is not None:
+        workspace_slug = _slugify(repo_root.name)
+        if workspace_slug in existing_slugs:
+            return workspace_slug
+
+    if len(existing_slugs) == 1:
+        return existing_slugs[0]
+
+    return _resolve_query_project_slug(role_path, query)
+
+
+def _detect_workflow_intent(query: str) -> str | None:
+    normalized = query.casefold()
+
+    if _contains_any(normalized, WORKFLOW_BUGFIX_ACTION_HINTS) and _contains_any(
+        normalized, WORKFLOW_BUGFIX_SUBJECT_HINTS
+    ):
+        return "bugfix"
+
+    if _contains_any(normalized, WORKFLOW_REQUIREMENTS_SUBJECT_HINTS) and _contains_any(
+        normalized, WORKFLOW_REQUIREMENTS_ACTION_HINTS
+    ):
+        return "requirements"
+
+    if _contains_any(normalized, WORKFLOW_ANALYSIS_ACTION_HINTS) and _contains_any(
+        normalized, WORKFLOW_ANALYSIS_SUBJECT_HINTS
+    ):
+        return "analysis"
+
+    return None
 
 
 def _resolve_brain_path(role_path: Path, relative_path: str) -> tuple[str, Path]:
@@ -152,17 +279,23 @@ def discover_brain_paths(role_path: Path, query: str, max_depth: int = 1) -> lis
 
 
 def _follow_project_context_links(role_path: Path, context_relative: str) -> list[str]:
-    context_path = role_path / context_relative
-    if not context_path.exists():
+    return _follow_same_directory_markdown_links(role_path, context_relative)
+
+
+def _follow_same_directory_markdown_links(role_path: Path, relative_path: str) -> list[str]:
+    source_path = role_path / relative_path
+    if not source_path.exists():
         return []
 
     discovered: list[str] = []
-    for linked in _extract_markdown_paths(context_path.read_text(encoding="utf-8")):
+    for linked in _extract_markdown_paths(source_path.read_text(encoding="utf-8")):
         normalized = linked.replace("\\", "/").lstrip("./")
         if normalized.startswith("projects/"):
             relative, full_path = _resolve_project_path(role_path, normalized)
+        elif normalized.startswith("brain/"):
+            relative, full_path = _resolve_brain_path(role_path, normalized)
         else:
-            full_path = context_path.parent / normalized
+            full_path = source_path.parent / normalized
             try:
                 relative = full_path.relative_to(role_path).as_posix()
             except ValueError:
@@ -170,11 +303,83 @@ def _follow_project_context_links(role_path: Path, context_relative: str) -> lis
         if (
             full_path.exists()
             and full_path.is_file()
-            and full_path.parent == context_path.parent
+            and full_path.parent == source_path.parent
             and relative not in discovered
         ):
             discovered.append(relative)
     return discovered
+
+
+def _is_nonempty_file(path: Path) -> bool:
+    return path.exists() and path.is_file() and bool(path.read_text(encoding="utf-8").strip())
+
+
+def _select_existing_path(role_path: Path, candidates: list[str]) -> str | None:
+    for candidate in candidates:
+        if _is_nonempty_file(role_path / candidate):
+            return candidate
+    return None
+
+
+def _discover_project_workflow_paths(role_path: Path, project_slug: str, intent: str) -> list[str]:
+    context_relative = f"projects/{project_slug}/context.md"
+    if not _is_nonempty_file(role_path / context_relative):
+        return []
+
+    workflow_relative = _select_existing_path(
+        role_path,
+        [
+            f"projects/{project_slug}/workflow-{intent}.md",
+            f"projects/{project_slug}/workflow.md",
+        ],
+    )
+    if workflow_relative is None:
+        return []
+
+    discovered: list[str] = []
+    if _is_nonempty_file(role_path / "projects/index.md"):
+        discovered.append("projects/index.md")
+    discovered.extend([context_relative, workflow_relative])
+
+    for linked in _follow_same_directory_markdown_links(role_path, workflow_relative)[:1]:
+        if linked not in discovered:
+            discovered.append(linked)
+    return discovered
+
+
+def _discover_global_workflow_paths(role_path: Path, intent: str) -> list[str]:
+    workflow_relative = _select_existing_path(
+        role_path,
+        [
+            f"brain/topics/general-workflow-{intent}.md",
+            "brain/topics/general-workflow.md",
+        ],
+    )
+    if workflow_relative is None:
+        return []
+
+    discovered: list[str] = []
+    if _is_nonempty_file(role_path / "brain/index.md"):
+        discovered.append("brain/index.md")
+    discovered.append(workflow_relative)
+    for linked in _follow_same_directory_markdown_links(role_path, workflow_relative)[:1]:
+        if linked not in discovered:
+            discovered.append(linked)
+    return discovered
+
+
+def discover_workflow_paths(role_path: Path, query: str) -> list[str]:
+    intent = _detect_workflow_intent(query)
+    if intent is None:
+        return []
+
+    project_slug = _resolve_current_project_slug(role_path, query)
+    if project_slug:
+        project_paths = _discover_project_workflow_paths(role_path, project_slug, intent)
+        if project_paths:
+            return project_paths
+
+    return _discover_global_workflow_paths(role_path, intent)
 
 
 def discover_project_paths(role_path: Path, query: str) -> list[str]:
@@ -211,6 +416,10 @@ def discover_project_paths(role_path: Path, query: str) -> list[str]:
 
 
 def discover_context_paths(role_path: Path, query: str, max_brain_depth: int = 1) -> list[str]:
+    workflow_paths = discover_workflow_paths(role_path, query)
+    if workflow_paths:
+        return workflow_paths
+
     route = route_context_lookup(role_path, query)
     discovered: list[str] = []
     seen: set[str] = set()

@@ -144,6 +144,140 @@ def test_discover_project_paths_follows_context_workflow_link_one_hop(tmp_role_h
     ]
 
 
+def test_discover_context_paths_prefers_current_project_workflow_from_nested_subdirectory(
+    tmp_role_home,
+    tmp_path,
+    monkeypatch,
+):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    repo_root = tmp_path / "roleMe"
+    repo_root.mkdir()
+    (repo_root / ".git").mkdir()
+    nested_dir = repo_root / "packages" / "ui"
+    nested_dir.mkdir(parents=True)
+    monkeypatch.chdir(nested_dir)
+
+    project_dir = role_path / "projects" / "roleme"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (role_path / "projects" / "index.md").write_text(
+        "# 项目索引\n\n- roleMe: projects/roleme/context.md\n",
+        encoding="utf-8",
+    )
+    (project_dir / "context.md").write_text(
+        "# roleMe\n\n项目摘要。\n",
+        encoding="utf-8",
+    )
+    (project_dir / "workflow-requirements.md").write_text(
+        "# roleMe Requirements Workflow\n\n## 适用任务\n\n开始需求、梳理需求。\n",
+        encoding="utf-8",
+    )
+    (role_path / "brain" / "topics").mkdir(parents=True, exist_ok=True)
+    (role_path / "brain" / "index.md").write_text(
+        "# 知识索引\n\n- 通用需求工作流: topics/general-workflow-requirements.md\n",
+        encoding="utf-8",
+    )
+    (role_path / "brain" / "topics" / "general-workflow-requirements.md").write_text(
+        "# 通用需求工作流\n\n## 适用任务\n\n开始需求、拆解目标。\n",
+        encoding="utf-8",
+    )
+
+    result = discover_context_paths(role_path, query="开始需求")
+
+    assert result == [
+        "projects/index.md",
+        "projects/roleme/context.md",
+        "projects/roleme/workflow-requirements.md",
+    ]
+
+
+def test_discover_context_paths_falls_back_to_project_generic_workflow_for_intent(
+    tmp_role_home,
+    tmp_path,
+    monkeypatch,
+):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    repo_root = tmp_path / "roleMe"
+    repo_root.mkdir()
+    (repo_root / ".git").mkdir()
+    monkeypatch.chdir(repo_root)
+
+    project_dir = role_path / "projects" / "roleme"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (role_path / "projects" / "index.md").write_text(
+        "# 项目索引\n\n- roleMe: projects/roleme/context.md\n",
+        encoding="utf-8",
+    )
+    (project_dir / "context.md").write_text("# roleMe\n\n项目摘要。\n", encoding="utf-8")
+    (project_dir / "workflow.md").write_text(
+        "# roleMe Workflow\n\n项目通用流程。\n",
+        encoding="utf-8",
+    )
+    (role_path / "brain" / "topics").mkdir(parents=True, exist_ok=True)
+    (role_path / "brain" / "index.md").write_text(
+        "# 知识索引\n\n- 通用需求工作流: topics/general-workflow-requirements.md\n",
+        encoding="utf-8",
+    )
+    (role_path / "brain" / "topics" / "general-workflow-requirements.md").write_text(
+        "# 通用需求工作流\n\n## 适用任务\n\n开始需求、拆解目标。\n",
+        encoding="utf-8",
+    )
+
+    result = discover_context_paths(role_path, query="开始需求")
+
+    assert result == [
+        "projects/index.md",
+        "projects/roleme/context.md",
+        "projects/roleme/workflow.md",
+    ]
+
+
+def test_discover_context_paths_falls_back_to_global_workflow_when_project_missing(
+    tmp_role_home,
+):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    (role_path / "brain" / "topics").mkdir(parents=True, exist_ok=True)
+    (role_path / "brain" / "index.md").write_text(
+        "# 知识索引\n\n- 通用需求工作流: topics/general-workflow-requirements.md\n",
+        encoding="utf-8",
+    )
+    (role_path / "brain" / "topics" / "general-workflow-requirements.md").write_text(
+        "# 通用需求工作流\n\n## 适用任务\n\n开始需求、拆解目标。\n",
+        encoding="utf-8",
+    )
+
+    result = discover_context_paths(role_path, query="开始需求")
+
+    assert result == [
+        "brain/index.md",
+        "brain/topics/general-workflow-requirements.md",
+    ]
+
+
+def test_discover_context_paths_does_not_inject_workflow_for_low_confidence_requests(
+    tmp_role_home,
+    tmp_path,
+    monkeypatch,
+):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    repo_root = tmp_path / "roleMe"
+    repo_root.mkdir()
+    (repo_root / ".git").mkdir()
+    monkeypatch.chdir(repo_root)
+
+    project_dir = role_path / "projects" / "roleme"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (role_path / "projects" / "index.md").write_text(
+        "# 项目索引\n\n- roleMe: projects/roleme/context.md\n",
+        encoding="utf-8",
+    )
+    (project_dir / "context.md").write_text("# roleMe\n\n项目摘要。\n", encoding="utf-8")
+    (project_dir / "workflow.md").write_text("# roleMe Workflow\n\n项目通用流程。\n", encoding="utf-8")
+
+    result = discover_context_paths(role_path, query="读一下这个文件")
+
+    assert "projects/roleme/workflow.md" not in result
+
+
 def test_build_context_snapshot_combines_resident_and_discovered_context(tmp_role_home):
     role_path = initialize_role("self", skill_version="0.1.0")
     (role_path / "persona" / "narrative.md").write_text(
