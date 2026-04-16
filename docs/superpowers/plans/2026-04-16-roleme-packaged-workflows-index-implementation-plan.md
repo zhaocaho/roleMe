@@ -15,7 +15,7 @@
 - Create: `tools/workflow_index.py`
   负责 workflow 索引条目数据结构、slug 规范化、Markdown 解析、渲染与 upsert。
 - Create: `tests/test_workflow_index.py`
-  覆盖 workflow 索引模块的 round-trip、更新去重和缺字段忽略逻辑。
+  覆盖 workflow 索引模块的 round-trip、slug 规范化、更新去重和缺字段忽略逻辑。
 - Modify: `tools/role_ops.py`
   扩展 `WorkflowArchivePlan`，改写项目级/全局 workflow 归档路径，并维护 `workflows/index.md` 与入口链接。
 - Modify: `tools/context_router.py`
@@ -57,10 +57,16 @@ from pathlib import Path
 
 from tools.workflow_index import (
     WorkflowIndexEntry,
+    normalize_workflow_slug,
     parse_workflow_index,
     render_workflow_index,
     upsert_workflow_index_entry,
 )
+
+
+def test_normalize_workflow_slug_keeps_stable_unicode_tokens():
+    assert normalize_workflow_slug("需求分析 workflow") == "需求分析-workflow"
+    assert normalize_workflow_slug(" RoleMe / Requirements  ") == "roleme-requirements"
 
 
 def test_parse_workflow_index_round_trips_structured_entries():
@@ -147,6 +153,12 @@ class WorkflowIndexEntry:
 
 SECTION_PATTERN = re.compile(r"^##\s+([A-Za-z0-9_-]+)\s*$", re.MULTILINE)
 FIELD_PATTERN = re.compile(r"^- ([a-z_]+):\s*(.*)$")
+
+
+def normalize_workflow_slug(value: str) -> str:
+    slug = re.sub(r"[^\w\u4e00-\u9fff]+", "-", value.casefold()).strip("-_")
+    slug = re.sub(r"-{2,}", "-", slug)
+    return slug or "workflow"
 
 
 def parse_workflow_index(text: str) -> list[WorkflowIndexEntry]:
@@ -275,6 +287,28 @@ def test_parse_workflow_archive_response_returns_structured_workflow_plan():
     )
 
 
+def test_parse_workflow_archive_response_derives_routable_defaults_for_legacy_payload():
+    plan = parse_workflow_archive_response(
+        {
+            "kind": "project",
+            "project_title": "roleMe",
+            "project_slug": "roleme",
+            "workflow_title": "roleMe 项目工作流",
+            "workflow_doc_markdown": "# roleMe 项目工作流\n\n先确认角色边界，再设计能力。\n",
+            "context_summary_markdown": "## 项目上下文\n\n该项目聚焦角色包与工作流沉淀。\n",
+            "user_rules": [],
+            "memory_summary": [],
+            "project_memory": [],
+        }
+    )
+
+    assert plan.workflow_slug == "roleme-项目工作流"
+    assert plan.workflow_summary == "该项目聚焦角色包与工作流沉淀。"
+    assert plan.workflow_applies_to == "该项目聚焦角色包与工作流沉淀。"
+    assert "roleme" in plan.workflow_keywords
+    assert "项目工作流" in plan.workflow_keywords
+
+
 def test_archive_general_workflow_writes_workflow_directory_and_index(tmp_role_home):
     initialize_role("self", skill_version="0.1.0")
     load_role_bundle("self")
@@ -341,12 +375,16 @@ def test_archive_project_workflow_writes_project_workflow_directory_and_context_
 - [ ] **Step 2: 运行 role_ops 与 roundtrip 定向测试，确认它们先失败**
 
 Run: `python3 -m pytest tests/test_role_ops.py -k "workflow_archive or archive_general_workflow or archive_project_workflow" tests/integration/test_role_roundtrip.py -k "workflow" -v`
-Expected: FAIL，因为 `WorkflowArchivePlan` 还没有 `workflow_slug` 等字段，归档函数也还在写旧路径。
+Expected: FAIL，因为 `WorkflowArchivePlan` 还没有 `workflow_slug` 等字段，旧 payload 也还不会自动补出可路由的 metadata，归档函数也还在写旧路径。
 
 - [ ] **Step 3: 扩展归档契约并把写入逻辑改成 `workflows/` 目录**
 
 ```python
-from tools.workflow_index import WorkflowIndexEntry, upsert_workflow_index_entry
+from tools.workflow_index import (
+    WorkflowIndexEntry,
+    normalize_workflow_slug,
+    upsert_workflow_index_entry,
+)
 
 
 @dataclass(frozen=True)
@@ -367,15 +405,52 @@ class WorkflowArchivePlan:
     project_memory: list[str]
 
 
-def parse_workflow_archive_response(raw: str | dict[str, object]) -> WorkflowArchivePlan:
-    payload = json.loads(raw) if isinstance(raw, str) else dict(raw)
-    workflow_title = str(payload.get("workflow_title", "")).strip()
-    workflow_slug = str(payload.get("workflow_slug", "")).strip() or normalize_workflow_slug(workflow_title)
+def _first_meaningful_line(text: str) -> str:
+    for raw_line in text.splitlines():
+        line = raw_line.strip(" -#\t")
+        if line:
+            return line
+    return ""
+
+
+def _derive_workflow_metadata(
+    payload: dict[str, object],
+    workflow_title: str,
+    workflow_slug: str,
+) -> tuple[str, str, list[str]]:
+    context_summary = str(payload.get("context_summary_markdown", "")).strip()
+    workflow_summary = (
+        str(payload.get("workflow_summary", "")).strip()
+        or _first_meaningful_line(context_summary)
+        or workflow_title
+    )
+    workflow_applies_to = (
+        str(payload.get("workflow_applies_to", "")).strip()
+        or _first_meaningful_line(context_summary)
+        or workflow_title
+    )
     workflow_keywords = [
         str(item).strip()
         for item in payload.get("workflow_keywords", [])
         if str(item).strip()
     ]
+    if not workflow_keywords:
+        tokens = re.findall(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]+", f"{workflow_title} {workflow_slug}")
+        workflow_keywords = list(dict.fromkeys(token.casefold() for token in tokens if token.strip()))
+    return workflow_summary, workflow_applies_to, workflow_keywords
+
+
+def parse_workflow_archive_response(raw: str | dict[str, object]) -> WorkflowArchivePlan:
+    payload = json.loads(raw) if isinstance(raw, str) else dict(raw)
+    workflow_title = str(payload.get("workflow_title", "")).strip()
+    if not workflow_title:
+        raise ValueError("workflow_title is required.")
+    workflow_slug = str(payload.get("workflow_slug", "")).strip() or normalize_workflow_slug(workflow_title)
+    workflow_summary, workflow_applies_to, workflow_keywords = _derive_workflow_metadata(
+        payload,
+        workflow_title,
+        workflow_slug,
+    )
     return WorkflowArchivePlan(
         kind=str(payload.get("kind", "")).strip().lower(),
         role_name=str(payload.get("role_name")).strip() if payload.get("role_name") is not None else None,
@@ -383,8 +458,8 @@ def parse_workflow_archive_response(raw: str | dict[str, object]) -> WorkflowArc
         project_slug=str(payload.get("project_slug")).strip() if payload.get("project_slug") is not None else None,
         workflow_slug=workflow_slug,
         workflow_title=workflow_title,
-        workflow_summary=str(payload.get("workflow_summary", "")).strip(),
-        workflow_applies_to=str(payload.get("workflow_applies_to", "")).strip(),
+        workflow_summary=workflow_summary,
+        workflow_applies_to=workflow_applies_to,
         workflow_keywords=workflow_keywords,
         workflow_doc_markdown=str(payload.get("workflow_doc_markdown", "")).strip(),
         context_summary_markdown=str(payload.get("context_summary_markdown", "")).strip(),
@@ -524,8 +599,17 @@ def test_discover_context_paths_prefers_project_workflow_index_entry(
     (repo_root / ".git").mkdir()
     monkeypatch.chdir(repo_root)
 
-    project_dir = role_path / "projects" / "roleme" / "workflows"
+    (role_path / "projects" / "index.md").write_text(
+        "# 项目索引\n\n- roleMe: projects/roleme/context.md\n",
+        encoding="utf-8",
+    )
+    project_root = role_path / "projects" / "roleme"
+    project_dir = project_root / "workflows"
     project_dir.mkdir(parents=True, exist_ok=True)
+    (project_root / "context.md").write_text(
+        "# roleMe\n\n项目摘要。\n\n- 参考知识: brain/topics/ai-product.md\n",
+        encoding="utf-8",
+    )
     (project_dir / "index.md").write_text(
         "# 工作流索引\n\n"
         "## requirements\n"
@@ -542,6 +626,8 @@ def test_discover_context_paths_prefers_project_workflow_index_entry(
     )
 
     assert discover_context_paths(role_path, query="开始梳理这个需求") == [
+        "projects/index.md",
+        "projects/roleme/context.md",
         "projects/roleme/workflows/index.md",
         "projects/roleme/workflows/requirements.md",
     ]
@@ -549,6 +635,10 @@ def test_discover_context_paths_prefers_project_workflow_index_entry(
 
 def test_discover_context_paths_falls_back_to_global_workflow_index_when_project_missing(tmp_role_home):
     role_path = initialize_role("self", skill_version="0.1.0")
+    (role_path / "brain" / "index.md").write_text(
+        "# 知识索引\n\n- 工作流索引: workflows/index.md\n",
+        encoding="utf-8",
+    )
     workflows_dir = role_path / "brain" / "workflows"
     workflows_dir.mkdir(parents=True, exist_ok=True)
     (workflows_dir / "index.md").write_text(
@@ -567,6 +657,7 @@ def test_discover_context_paths_falls_back_to_global_workflow_index_when_project
     )
 
     assert discover_context_paths(role_path, query="帮我分析这个异常原因") == [
+        "brain/index.md",
         "brain/workflows/index.md",
         "brain/workflows/analysis.md",
     ]
@@ -605,7 +696,7 @@ def test_discover_context_paths_does_not_inject_ambiguous_workflow_entries(tmp_r
 - [ ] **Step 2: 运行 context_router 定向测试，确认索引路由测试先失败**
 
 Run: `python3 -m pytest tests/test_context_router.py -k "workflow_index or ambiguous or falls_back_to_global" -v`
-Expected: FAIL，因为 `context_router.py` 还只认识旧 `workflow.md` / `general-workflow*.md` 路径。
+Expected: FAIL，因为 `context_router.py` 还只认识旧 `workflow.md` / `general-workflow*.md` 路径，也还不会在 workflow 命中时保留原有 `context.md` / `brain/index.md` 入口。
 
 - [ ] **Step 3: 实现基于 workflow 索引的命中逻辑**
 
@@ -649,17 +740,42 @@ def _discover_workflow_paths_from_index(role_path: Path, index_relative: str, qu
     return [index_relative, workflow_relative]
 
 
+def _discover_project_workflow_paths(role_path: Path, project_slug: str, query: str) -> list[str]:
+    workflow_bundle = _discover_workflow_paths_from_index(
+        role_path,
+        f"projects/{project_slug}/workflows/index.md",
+        query,
+    )
+    if not workflow_bundle:
+        return []
+    discovered: list[str] = []
+    if _is_nonempty_file(role_path / "projects/index.md"):
+        discovered.append("projects/index.md")
+    context_relative = f"projects/{project_slug}/context.md"
+    if _is_nonempty_file(role_path / context_relative):
+        discovered.append(context_relative)
+    discovered.extend(workflow_bundle)
+    return discovered
+
+
+def _discover_global_workflow_paths(role_path: Path, query: str) -> list[str]:
+    workflow_bundle = _discover_workflow_paths_from_index(role_path, "brain/workflows/index.md", query)
+    if not workflow_bundle:
+        return []
+    discovered: list[str] = []
+    if _is_nonempty_file(role_path / "brain/index.md"):
+        discovered.append("brain/index.md")
+    discovered.extend(workflow_bundle)
+    return discovered
+
+
 def discover_workflow_paths(role_path: Path, query: str) -> list[str]:
     project_slug = _resolve_current_project_slug(role_path, query)
     if project_slug:
-        project_paths = _discover_workflow_paths_from_index(
-            role_path,
-            f"projects/{project_slug}/workflows/index.md",
-            query,
-        )
+        project_paths = _discover_project_workflow_paths(role_path, project_slug, query)
         if project_paths:
             return project_paths
-    return _discover_workflow_paths_from_index(role_path, "brain/workflows/index.md", query)
+    return _discover_global_workflow_paths(role_path, query)
 ```
 
 - [ ] **Step 4: 重新运行 context_router 测试，确认索引路由通过**
@@ -697,7 +813,10 @@ def test_build_skill_includes_workflows_index_guidance(tmp_path):
     assert "projects/<project-slug>/workflows/index.md" in skill_md
     assert "brain/workflows/index.md" in usage_md
     assert "一个 workflow，一个文件" in usage_md
-    assert "旧 `workflow.md`" in usage_md
+    assert "workflow.md" not in skill_md
+    assert "workflow.md" not in usage_md
+    assert "general-workflow.md" not in skill_md
+    assert "general-workflow.md" not in usage_md
 ```
 
 - [ ] **Step 2: 更新 bundle 文档里的 workflow 路径和说明**
@@ -706,7 +825,7 @@ def test_build_skill_includes_workflows_index_guidance(tmp_path):
 - 项目级 workflow 写入 `projects/<project-slug>/workflows/index.md` 与 `projects/<project-slug>/workflows/<workflow-slug>.md`
 - 通用 workflow 写入 `brain/workflows/index.md` 与 `brain/workflows/<workflow-slug>.md`
 - `context.md` 与 `brain/index.md` 只保留到 `workflows/index.md` 的入口
-- 任何新建 workflow 一旦成立，都应独立成文件，不再混写到 `workflow.md`
+- 任何新建 workflow 一旦成立，都应独立成文件，不再混写到旧的单文件 workflow 说明里
 ```
 
 - [ ] **Step 3: 重建打包产物**
@@ -743,8 +862,8 @@ Expected: PASS
 
 - [ ] **Step 2: 检查最终 diff，只保留预期文件和新结构**
 
-Run: `git diff --stat HEAD~4..HEAD && rg -n "workflow\\.md|general-workflow\\.md" bundle tools tests skills/roleme -g '*.md' -g '*.py'`
-Expected: `git diff --stat` 只包含计划中的文件；`rg` 结果只允许出现在历史设计文档和实现计划里，不应再出现在运行时代码、bundle 文档或测试断言中。
+Run: `git diff --stat HEAD~4..HEAD && rg -n "workflow\\.md|general-workflow\\.md" bundle tools skills/roleme -g '*.md' -g '*.py'`
+Expected: `git diff --stat` 只包含计划中的文件；`rg` 不应在运行时代码、bundle 文档或打包产物中返回旧路径字符串。
 
 - [ ] **Step 3: 如回归阶段有补丁，提交最后修复**
 
