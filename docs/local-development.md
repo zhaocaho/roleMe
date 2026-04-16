@@ -65,8 +65,8 @@ skills/roleme/
 
 当前发布产物默认包含：
 
+- `skill.yaml`
 - `SKILL.md`
-- `agents/openai.yaml`
 - `tools/`
 - `assets/templates/`
 - `references/`（如果 `bundle/references/` 存在）

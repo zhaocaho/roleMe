@@ -117,8 +117,8 @@
 
 最终产物只带运行时真正需要的内容：
 
+- `skill.yaml`
 - `SKILL.md`
-- `agents/openai.yaml`
 - `tools/`
 - `assets/templates/`
 - `references/`（如果存在）

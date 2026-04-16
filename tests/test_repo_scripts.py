@@ -5,6 +5,7 @@ def test_build_skill_creates_artifact_without_scripts(tmp_path):
     artifact = build_skill(output_root=tmp_path)
 
     assert artifact.name == "roleme"
+    assert (artifact / "skill.yaml").exists()
     assert (artifact / "SKILL.md").exists()
     assert (artifact / "references" / "usage.md").exists()
     assert (artifact / "tools" / "role_ops.py").exists()
@@ -15,18 +16,21 @@ def test_build_skill_creates_artifact_without_scripts(tmp_path):
     assert (artifact / "assets" / "templates" / "interview-planner-system.md").exists()
     assert (artifact / "assets" / "templates" / "persona" / "narrative.md").exists()
     assert not (artifact / "assets" / "templates" / "self-model").exists()
+    assert not (artifact / "agents").exists()
     assert not (artifact / "scripts").exists()
     assert not (artifact / "tools" / "__pycache__").exists()
 
 
 def test_build_skill_ignores_python_cache_files(tmp_path, monkeypatch):
-    (tmp_path / "bundle" / "agents").mkdir(parents=True)
     (tmp_path / "bundle" / "references").mkdir(parents=True)
     (tmp_path / "tools" / "__pycache__").mkdir(parents=True)
     (tmp_path / "templates" / "persona").mkdir(parents=True)
 
     (tmp_path / "bundle" / "SKILL.template.md").write_text("---\nname: roleme\n---\n", encoding="utf-8")
-    (tmp_path / "bundle" / "agents" / "openai.yaml").write_text("name: roleMe\n", encoding="utf-8")
+    (tmp_path / "bundle" / "skill.yaml").write_text(
+        'name: "roleMe"\nversion: "0.1.0"\ndescription: "portable"\nentry: "SKILL.md"\n',
+        encoding="utf-8",
+    )
     (tmp_path / "bundle" / "references" / "usage.md").write_text("usage\n", encoding="utf-8")
     (tmp_path / "tools" / "role_ops.py").write_text("", encoding="utf-8")
     (tmp_path / "tools" / "memory.py").write_text("", encoding="utf-8")
@@ -48,10 +52,12 @@ def test_build_skill_ignores_python_cache_files(tmp_path, monkeypatch):
 def test_build_skill_preserves_skill_frontmatter(tmp_path):
     artifact = build_skill(output_root=tmp_path)
     skill_md = (artifact / "SKILL.md").read_text(encoding="utf-8")
+    manifest = (artifact / "skill.yaml").read_text(encoding="utf-8")
 
     assert skill_md.startswith("---\n")
     assert "name: roleme" in skill_md
     assert "description:" in skill_md
+    assert 'entry: "SKILL.md"' in manifest
 
 
 def test_build_skill_includes_reload_reminder_after_initialization(tmp_path):
@@ -115,13 +121,15 @@ def test_build_skill_includes_natural_language_archive_guidance(tmp_path):
 
 
 def test_publish_skill_writes_repo_publish_directory(tmp_path, monkeypatch):
-    (tmp_path / "bundle" / "agents").mkdir(parents=True)
     (tmp_path / "bundle" / "references").mkdir(parents=True)
     (tmp_path / "tools").mkdir()
     (tmp_path / "templates" / "persona").mkdir(parents=True)
 
     (tmp_path / "bundle" / "SKILL.template.md").write_text("---\nname: roleme\n---\n", encoding="utf-8")
-    (tmp_path / "bundle" / "agents" / "openai.yaml").write_text("name: roleMe\n", encoding="utf-8")
+    (tmp_path / "bundle" / "skill.yaml").write_text(
+        'name: "roleMe"\nversion: "0.1.0"\ndescription: "portable"\nentry: "SKILL.md"\n',
+        encoding="utf-8",
+    )
     (tmp_path / "bundle" / "references" / "usage.md").write_text("usage\n", encoding="utf-8")
     (tmp_path / "tools" / "role_ops.py").write_text("", encoding="utf-8")
     (tmp_path / "tools" / "memory.py").write_text("", encoding="utf-8")
@@ -136,8 +144,9 @@ def test_publish_skill_writes_repo_publish_directory(tmp_path, monkeypatch):
     artifact = publish_skill()
 
     assert artifact == tmp_path / "skills" / "roleme"
+    assert (artifact / "skill.yaml").exists()
     assert (artifact / "SKILL.md").exists()
-    assert (artifact / "agents" / "openai.yaml").exists()
+    assert not (artifact / "agents").exists()
     assert (artifact / "references" / "usage.md").exists()
     assert (artifact / "tools" / "role_ops.py").exists()
     assert (artifact / "tools" / "context_router.py").exists()
@@ -147,13 +156,15 @@ def test_publish_skill_writes_repo_publish_directory(tmp_path, monkeypatch):
 
 
 def test_build_script_runs_publish_when_executed_directly(tmp_path, monkeypatch):
-    (tmp_path / "bundle" / "agents").mkdir(parents=True)
     (tmp_path / "bundle" / "references").mkdir(parents=True)
     (tmp_path / "tools").mkdir()
     (tmp_path / "templates" / "persona").mkdir(parents=True)
 
     (tmp_path / "bundle" / "SKILL.template.md").write_text("---\nname: roleme\n---\n", encoding="utf-8")
-    (tmp_path / "bundle" / "agents" / "openai.yaml").write_text("name: roleMe\n", encoding="utf-8")
+    (tmp_path / "bundle" / "skill.yaml").write_text(
+        'name: "roleMe"\nversion: "0.1.0"\ndescription: "portable"\nentry: "SKILL.md"\n',
+        encoding="utf-8",
+    )
     (tmp_path / "bundle" / "references" / "usage.md").write_text("usage\n", encoding="utf-8")
     (tmp_path / "tools" / "role_ops.py").write_text("", encoding="utf-8")
     (tmp_path / "tools" / "memory.py").write_text("", encoding="utf-8")
@@ -172,4 +183,5 @@ def test_build_script_runs_publish_when_executed_directly(tmp_path, monkeypatch)
     }
     exec("if __name__ == '__main__':\n    publish_skill()", namespace)
 
+    assert (tmp_path / "skills" / "roleme" / "skill.yaml").exists()
     assert (tmp_path / "skills" / "roleme" / "SKILL.md").exists()

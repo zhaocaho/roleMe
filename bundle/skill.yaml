@@ -1,0 +1,4 @@
+name: "roleMe"
+version: "0.1.0"
+description: "Portable role package runtime with progressive disclosure and minimal tools."
+entry: "SKILL.md"

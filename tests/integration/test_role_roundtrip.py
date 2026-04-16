@@ -40,6 +40,7 @@ def test_role_roundtrip_init_load_write_memory_and_package(tmp_role_home, tmp_pa
     assert "default Chinese communication" in snapshot
     assert report.missing_files == []
     assert artifact.name == "roleme"
+    assert (artifact / "skill.yaml").exists()
     assert (artifact / "SKILL.md").exists()
     assert (artifact / "assets" / "templates" / "persona" / "narrative.md").exists()
 
