@@ -94,8 +94,29 @@
 - 如果当前项目存在，则尝试读取 `projects/<project-slug>/workflows/index.md`
 - 同时尝试读取 `brain/workflows/index.md`
 - 解析出可用 workflow 条目后，生成轻量 workflow 摘要块
+- 将 workflow 摘要块写入 resident snapshot 的专门 section，而不是散落拼接到普通说明文本中
 
 加载层只负责把“有哪些 workflow 可选”整理出来，不负责展开正文。
+
+### resident snapshot 落点
+
+workflow 摘要块应作为 resident snapshot 中的独立 section 存在，建议语义上固定为两部分：
+
+- `Current Project Workflow Summaries`
+- `Global Workflow Summaries`
+
+设计要求：
+
+- 该 section 属于 resident snapshot 的固定组成部分，而不是临时拼接的自由文本
+- section 内容由 workflow 索引解析结果生成
+- 后续路由或回答阶段若要消费 workflow 摘要，应优先读取这个固定 section，而不是重新从快照全文做模糊搜索
+
+这样可以避免后续实现出现两套风格：
+
+- 一部分实现把摘要块当作普通文本段落插入
+- 另一部分实现把摘要块当作结构化快照片段维护
+
+本设计明确选择后者：摘要块是 resident snapshot 的命名 section。
 
 ### 二、路由层
 
@@ -153,6 +174,21 @@
 - 是否提到 PRD、软件需求规格说明书、用户故事、开发计划、端到端等流程信号
 - 是否与某个 workflow 的 `applies_to`、`keywords`、`summary` 有多处重合
 
+### 与现有评分体系的关系
+
+本设计默认继续沿用 `context_router.py` 已有的 workflow 评分与阈值体系，不在本轮设计中单独引入一套新的摘要块专属评分算法。
+
+实现边界建议：
+
+- 预加载 workflow 摘要块的改动，目标是让 resident snapshot 提前暴露候选 workflow 信息
+- workflow 的最终发现与正文展开，仍尽量复用现有 `discover_workflow_paths()` 及相关打分逻辑
+- 如果后续实现中确实需要调整阈值或评分规则，应作为显式的附带变更记录在计划和测试中，不应与“摘要块预加载”混在一起隐式修改
+
+这样可以保证后续验证更清晰：
+
+- 如果命中率提升，能明确归因于“候选 workflow 被提前暴露”
+- 而不是加载逻辑与打分逻辑同时漂移，导致收益来源不可解释
+
 ### 冲突规则
 
 - 项目候选与全局候选同时匹配时，项目优先
@@ -193,8 +229,23 @@ project: coresys-devops
 
 - 只保留 `slug`、`title`、`applies_to`、`keywords`、`summary`
 - 不把具体 workflow 正文写进 resident snapshot
-- 系统内部需要保留 `slug -> file path` 的映射，用于命中后展开正文
+- 系统内部需要保留 `scope-aware key -> file path` 的映射，用于命中后展开正文
 - 项目 workflow 与全局 workflow 要分开生成，避免丢失优先级语义
+
+### 内部映射约束
+
+为避免项目 workflow 与全局 workflow 出现同名 `slug` 时相互覆盖，内部映射不能只使用裸 `slug` 作为 key。
+
+建议使用带作用域的 key，例如：
+
+- `project:end-to-end-delivery`
+- `global:requirements`
+
+约束如下：
+
+- 映射 key 必须包含作用域信息
+- 项目 workflow 与全局 workflow 即使 `slug` 相同，也必须保留为两个独立候选
+- 路由命中时，先根据作用域优先级选择候选，再通过带作用域的 key 展开对应正文
 
 ### 加载失败回退
 

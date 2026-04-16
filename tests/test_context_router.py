@@ -336,6 +336,91 @@ def test_build_context_snapshot_combines_resident_and_discovered_context(tmp_rol
     assert "brain/topics/ai-product.md" in snapshot
 
 
+def test_build_context_snapshot_includes_resident_workflow_summary_sections(
+    tmp_role_home,
+    tmp_path,
+    monkeypatch,
+):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    repo_root = tmp_path / "roleMe"
+    repo_root.mkdir()
+    (repo_root / ".git").mkdir()
+    monkeypatch.chdir(repo_root)
+
+    (role_path / "projects" / "index.md").write_text(
+        "# 项目索引\n\n- roleMe: projects/roleme/context.md\n",
+        encoding="utf-8",
+    )
+    project_dir = role_path / "projects" / "roleme"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / "context.md").write_text("# roleMe\n\n项目摘要。\n", encoding="utf-8")
+    workflows_dir = project_dir / "workflows"
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+    (workflows_dir / "index.md").write_text(
+        "# 工作流索引\n\n"
+        "## requirements\n"
+        "- title: 需求分析 workflow\n"
+        "- file: requirements.md\n"
+        "- applies_to: 当用户想梳理需求、澄清范围、整理用户故事时使用\n"
+        "- keywords: 需求, scope\n"
+        "- summary: 用于把模糊需求整理成可规划输入\n",
+        encoding="utf-8",
+    )
+
+    snapshot = build_context_snapshot(role_path, query="开始梳理需求", max_chars=1200)
+
+    assert "## resident" in snapshot
+    assert "## Current Project Workflow Summaries" in snapshot
+    assert "## discovered" in snapshot
+
+
+def test_discover_context_paths_matches_project_workflow_for_end_to_end_delivery_language(
+    tmp_role_home,
+    tmp_path,
+    monkeypatch,
+):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    repo_root = tmp_path / "coresys-devops"
+    repo_root.mkdir()
+    (repo_root / ".git").mkdir()
+    monkeypatch.chdir(repo_root)
+
+    (role_path / "projects" / "index.md").write_text(
+        "# 项目索引\n\n- coresys-devops: projects/coresys-devops/context.md\n",
+        encoding="utf-8",
+    )
+    project_dir = role_path / "projects" / "coresys-devops"
+    workflows_dir = project_dir / "workflows"
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / "context.md").write_text("# coresys-devops\n\n项目摘要。\n", encoding="utf-8")
+    (workflows_dir / "index.md").write_text(
+        "# 工作流索引\n\n"
+        "## end-to-end-delivery\n"
+        "- title: 端到端交付 workflow\n"
+        "- file: end-to-end-delivery.md\n"
+        "- applies_to: 当用户要求按完整交付流程推进需求实现时使用\n"
+        "- keywords: 端到端开发流程, 软件需求规格说明书, 前后端, 数据库, 完整实现\n"
+        "- summary: 用于从需求澄清到上线发布的完整闭环\n",
+        encoding="utf-8",
+    )
+    (workflows_dir / "end-to-end-delivery.md").write_text(
+        "# End-to-End Delivery Workflow\n\n正文。\n",
+        encoding="utf-8",
+    )
+
+    result = discover_context_paths(
+        role_path,
+        query="用端到端开发流程来实现以下需求，并按照软件需求规格说明书完成前后端和数据库代码",
+    )
+
+    assert result == [
+        "projects/index.md",
+        "projects/coresys-devops/context.md",
+        "projects/coresys-devops/workflows/index.md",
+        "projects/coresys-devops/workflows/end-to-end-delivery.md",
+    ]
+
+
 def test_build_context_snapshot_respects_character_budget(tmp_role_home):
     role_path = initialize_role("self", skill_version="0.1.0")
     (role_path / "brain" / "topics").mkdir(parents=True, exist_ok=True)

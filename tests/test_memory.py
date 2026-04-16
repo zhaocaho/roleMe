@@ -19,6 +19,86 @@ def test_build_frozen_snapshot_uses_resident_layers(tmp_role_home):
     assert len(snapshot) <= 300
 
 
+def test_build_frozen_snapshot_includes_current_project_and_global_workflow_summaries(
+    tmp_role_home,
+    tmp_path,
+    monkeypatch,
+):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    repo_root = tmp_path / "roleMe"
+    repo_root.mkdir()
+    (repo_root / ".git").mkdir()
+    monkeypatch.chdir(repo_root)
+
+    (role_path / "projects" / "index.md").write_text(
+        "# 项目索引\n\n- roleMe: projects/roleme/context.md\n",
+        encoding="utf-8",
+    )
+    project_dir = role_path / "projects" / "roleme"
+    workflows_dir = project_dir / "workflows"
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / "context.md").write_text("# roleMe\n\n项目摘要。\n", encoding="utf-8")
+    (workflows_dir / "index.md").write_text(
+        "# 工作流索引\n\n"
+        "## requirements\n"
+        "- title: 需求分析 workflow\n"
+        "- file: requirements.md\n"
+        "- applies_to: 当用户想梳理需求、澄清范围、整理用户故事时使用\n"
+        "- keywords: 需求, scope\n"
+        "- summary: 用于把模糊需求整理成可规划输入\n",
+        encoding="utf-8",
+    )
+
+    global_dir = role_path / "brain" / "workflows"
+    global_dir.mkdir(parents=True, exist_ok=True)
+    (global_dir / "index.md").write_text(
+        "# 工作流索引\n\n"
+        "## analysis\n"
+        "- title: 问题分析 workflow\n"
+        "- file: analysis.md\n"
+        "- applies_to: 当用户想分析问题、排查原因时使用\n"
+        "- keywords: 分析, 排查\n"
+        "- summary: 用于定位问题和形成分析结论\n",
+        encoding="utf-8",
+    )
+
+    snapshot = build_frozen_snapshot(role_path, max_chars=1200)
+
+    assert "## Current Project Workflow Summaries" in snapshot
+    assert "project: roleme" in snapshot
+    assert "slug: requirements" in snapshot
+    assert "## Global Workflow Summaries" in snapshot
+    assert "slug: analysis" in snapshot
+
+
+def test_build_frozen_snapshot_skips_workflow_summaries_when_indexes_missing_or_invalid(
+    tmp_role_home,
+    tmp_path,
+    monkeypatch,
+):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    repo_root = tmp_path / "roleMe"
+    repo_root.mkdir()
+    (repo_root / ".git").mkdir()
+    monkeypatch.chdir(repo_root)
+
+    (role_path / "projects" / "index.md").write_text(
+        "# 项目索引\n\n- roleMe: projects/roleme/context.md\n",
+        encoding="utf-8",
+    )
+    project_dir = role_path / "projects" / "roleme"
+    project_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / "context.md").write_text("# roleMe\n\n项目摘要。\n", encoding="utf-8")
+    invalid_dir = project_dir / "workflows"
+    invalid_dir.mkdir(parents=True, exist_ok=True)
+    (invalid_dir / "index.md").write_text("# 工作流索引\n\n- bad shape\n", encoding="utf-8")
+
+    snapshot = build_frozen_snapshot(role_path, max_chars=1200)
+
+    assert "## Current Project Workflow Summaries" not in snapshot
+    assert "## Global Workflow Summaries" not in snapshot
+
+
 def test_summarize_and_write_deduplicates_entries(tmp_role_home):
     role_path = initialize_role("self", skill_version="0.1.0")
     summarize_and_write(

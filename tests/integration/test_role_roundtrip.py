@@ -142,6 +142,41 @@ def test_role_roundtrip_builds_query_specific_context_snapshot(tmp_role_home):
     assert "brain/topics/ai-product.md" in snapshot
 
 
+def test_role_roundtrip_load_query_bundle_includes_workflow_summary_sections(
+    tmp_role_home,
+    tmp_path,
+    monkeypatch,
+):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    repo_root = tmp_path / "roleMe"
+    repo_root.mkdir()
+    (repo_root / ".git").mkdir()
+    monkeypatch.chdir(repo_root)
+
+    (role_path / "projects" / "index.md").write_text(
+        "# 项目索引\n\n- roleMe: projects/roleme/context.md\n",
+        encoding="utf-8",
+    )
+    project_dir = role_path / "projects" / "roleme"
+    workflows_dir = project_dir / "workflows"
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+    (project_dir / "context.md").write_text("# roleMe\n\n项目摘要。\n", encoding="utf-8")
+    (workflows_dir / "index.md").write_text(
+        "# 工作流索引\n\n"
+        "## requirements\n"
+        "- title: 需求分析 workflow\n"
+        "- file: requirements.md\n"
+        "- applies_to: 当用户想梳理需求时使用\n"
+        "- keywords: 需求\n"
+        "- summary: 用于把模糊需求整理成可规划输入\n",
+        encoding="utf-8",
+    )
+
+    bundle = load_query_context_bundle("self", query="开始梳理需求", max_chars=1500)
+
+    assert "## Current Project Workflow Summaries" in bundle.context_snapshot
+
+
 def test_role_roundtrip_loads_query_context_bundle(tmp_role_home):
     role_path = initialize_role("self", skill_version="0.1.0")
     project_dir = role_path / "projects" / "roleme"
