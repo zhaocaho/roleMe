@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 
 from tools.memory import build_frozen_snapshot
+from tools.workflow_index import WorkflowIndexEntry, parse_workflow_index
 
 
 PROJECT_HINTS = {
@@ -33,6 +34,8 @@ DOMAIN_HINTS = {
 }
 PATH_PATTERN = re.compile(r"([A-Za-z0-9_./-]+\.md)")
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]+")
+CJK_RUN_PATTERN = re.compile(r"[\u4e00-\u9fff]+")
+ASCII_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+")
 
 
 @dataclass(frozen=True)
@@ -57,6 +60,54 @@ def _extract_markdown_paths(text: str) -> list[str]:
 def _score_text(query_tokens: set[str], text: str) -> int:
     text_tokens = _tokenize(text)
     return len(query_tokens & text_tokens)
+
+
+def _slugify(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", value.casefold()).strip("-")
+
+
+def _find_git_repo_root(start: Path | None = None) -> Path | None:
+    current = (start or Path.cwd()).resolve()
+    for candidate in [current, *current.parents]:
+        if (candidate / ".git").exists():
+            return candidate
+    return None
+
+
+def _list_project_slugs(role_path: Path) -> list[str]:
+    projects_dir = role_path / "projects"
+    if not projects_dir.exists():
+        return []
+    return sorted(path.name for path in projects_dir.iterdir() if path.is_dir())
+
+
+def _resolve_query_project_slug(role_path: Path, query: str) -> str | None:
+    if not any(hint in query.casefold() for hint in PROJECT_HINTS):
+        return None
+
+    for path in discover_project_paths(role_path, query):
+        if path.startswith("projects/") and path.endswith("/context.md"):
+            parts = path.split("/")
+            if len(parts) >= 3:
+                return parts[1]
+    return None
+
+
+def _resolve_current_project_slug(role_path: Path, query: str) -> str | None:
+    existing_slugs = _list_project_slugs(role_path)
+    if not existing_slugs:
+        return None
+
+    repo_root = _find_git_repo_root()
+    if repo_root is not None:
+        workspace_slug = _slugify(repo_root.name)
+        if workspace_slug in existing_slugs:
+            return workspace_slug
+
+    if len(existing_slugs) == 1:
+        return existing_slugs[0]
+
+    return _resolve_query_project_slug(role_path, query)
 
 
 def _resolve_brain_path(role_path: Path, relative_path: str) -> tuple[str, Path]:
@@ -152,17 +203,23 @@ def discover_brain_paths(role_path: Path, query: str, max_depth: int = 1) -> lis
 
 
 def _follow_project_context_links(role_path: Path, context_relative: str) -> list[str]:
-    context_path = role_path / context_relative
-    if not context_path.exists():
+    return _follow_same_directory_markdown_links(role_path, context_relative)
+
+
+def _follow_same_directory_markdown_links(role_path: Path, relative_path: str) -> list[str]:
+    source_path = role_path / relative_path
+    if not source_path.exists():
         return []
 
     discovered: list[str] = []
-    for linked in _extract_markdown_paths(context_path.read_text(encoding="utf-8")):
+    for linked in _extract_markdown_paths(source_path.read_text(encoding="utf-8")):
         normalized = linked.replace("\\", "/").lstrip("./")
         if normalized.startswith("projects/"):
             relative, full_path = _resolve_project_path(role_path, normalized)
+        elif normalized.startswith("brain/"):
+            relative, full_path = _resolve_brain_path(role_path, normalized)
         else:
-            full_path = context_path.parent / normalized
+            full_path = source_path.parent / normalized
             try:
                 relative = full_path.relative_to(role_path).as_posix()
             except ValueError:
@@ -170,11 +227,115 @@ def _follow_project_context_links(role_path: Path, context_relative: str) -> lis
         if (
             full_path.exists()
             and full_path.is_file()
-            and full_path.parent == context_path.parent
+            and full_path.parent == source_path.parent
             and relative not in discovered
         ):
             discovered.append(relative)
     return discovered
+
+
+def _is_nonempty_file(path: Path) -> bool:
+    return path.exists() and path.is_file() and bool(path.read_text(encoding="utf-8").strip())
+
+
+def _workflow_signal_terms(text: str) -> set[str]:
+    normalized = text.casefold()
+    terms = {token for token in ASCII_TOKEN_PATTERN.findall(normalized) if token}
+    for run in CJK_RUN_PATTERN.findall(normalized):
+        if len(run) == 1:
+            terms.add(run)
+            continue
+        for index in range(len(run) - 1):
+            terms.add(run[index : index + 2])
+    return terms
+
+
+def _score_workflow_entry(query_terms: set[str], entry: WorkflowIndexEntry) -> int:
+    keyword_terms: set[str] = set()
+    for keyword in entry.keywords:
+        keyword_terms.update(_workflow_signal_terms(keyword))
+
+    score = 2 * len(query_terms & _workflow_signal_terms(entry.applies_to))
+    score += len(query_terms & keyword_terms)
+    score += len(query_terms & _workflow_signal_terms(entry.title))
+    score += len(query_terms & _workflow_signal_terms(Path(entry.file).stem.replace("-", " ")))
+    return score
+
+
+def _select_workflow_entry(query: str, entries: list[WorkflowIndexEntry]) -> WorkflowIndexEntry | None:
+    query_terms = _workflow_signal_terms(query)
+    if not query_terms:
+        return None
+
+    ranked = sorted(
+        ((entry, _score_workflow_entry(query_terms, entry)) for entry in entries),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    if not ranked or ranked[0][1] < 4:
+        return None
+    if len(ranked) > 1 and ranked[0][1] - ranked[1][1] < 5:
+        return None
+    return ranked[0][0]
+
+
+def _discover_workflow_paths_from_index(role_path: Path, index_relative: str, query: str) -> list[str]:
+    index_path = role_path / index_relative
+    if not _is_nonempty_file(index_path):
+        return []
+
+    entry = _select_workflow_entry(
+        query,
+        parse_workflow_index(index_path.read_text(encoding="utf-8")),
+    )
+    if entry is None:
+        return []
+
+    workflow_relative = f"{Path(index_relative).parent.as_posix()}/{entry.file}"
+    if not _is_nonempty_file(role_path / workflow_relative):
+        return []
+    return [index_relative, workflow_relative]
+
+
+def _discover_project_workflow_paths(role_path: Path, project_slug: str, query: str) -> list[str]:
+    workflow_bundle = _discover_workflow_paths_from_index(
+        role_path,
+        f"projects/{project_slug}/workflows/index.md",
+        query,
+    )
+    if not workflow_bundle:
+        return []
+
+    discovered: list[str] = []
+    if _is_nonempty_file(role_path / "projects/index.md"):
+        discovered.append("projects/index.md")
+    context_relative = f"projects/{project_slug}/context.md"
+    if _is_nonempty_file(role_path / context_relative):
+        discovered.append(context_relative)
+    discovered.extend(workflow_bundle)
+    return discovered
+
+
+def _discover_global_workflow_paths(role_path: Path, query: str) -> list[str]:
+    workflow_bundle = _discover_workflow_paths_from_index(role_path, "brain/workflows/index.md", query)
+    if not workflow_bundle:
+        return []
+
+    discovered: list[str] = []
+    if _is_nonempty_file(role_path / "brain/index.md"):
+        discovered.append("brain/index.md")
+    discovered.extend(workflow_bundle)
+    return discovered
+
+
+def discover_workflow_paths(role_path: Path, query: str) -> list[str]:
+    project_slug = _resolve_current_project_slug(role_path, query)
+    if project_slug:
+        project_paths = _discover_project_workflow_paths(role_path, project_slug, query)
+        if project_paths:
+            return project_paths
+
+    return _discover_global_workflow_paths(role_path, query)
 
 
 def discover_project_paths(role_path: Path, query: str) -> list[str]:
@@ -211,6 +372,10 @@ def discover_project_paths(role_path: Path, query: str) -> list[str]:
 
 
 def discover_context_paths(role_path: Path, query: str, max_brain_depth: int = 1) -> list[str]:
+    workflow_paths = discover_workflow_paths(role_path, query)
+    if workflow_paths:
+        return workflow_paths
+
     route = route_context_lookup(role_path, query)
     discovered: list[str] = []
     seen: set[str] = set()

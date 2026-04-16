@@ -108,8 +108,10 @@
 
 默认归档路径：
 
-- 项目级 workflow：`projects/<project-slug>/workflow.md`、`context.md`、`memory.md`
-- 通用 workflow：`brain/topics/general-workflow.md`、`brain/index.md`、`memory/USER.md`、`memory/MEMORY.md`
+- 项目级 workflow：`projects/<project-slug>/workflows/index.md` 作为路由入口，具体流程写入 `projects/<project-slug>/workflows/<workflow-slug>.md`；`context.md` 保留到工作流索引的入口，项目记忆仍写 `memory.md`
+- 通用 workflow：`brain/workflows/index.md` 作为路由入口，具体流程写入 `brain/workflows/<workflow-slug>.md`；`brain/index.md` 保留到工作流索引的入口，稳定规则仍可提升到 `memory/USER.md`、`memory/MEMORY.md`
+
+这里遵循一个硬规则：一个 workflow，一个文件。
 
 如果本次写入提升了 `memory/USER.md` 或 `memory/MEMORY.md`，需要重新执行 `/roleMe <角色名>` 才会刷新当前会话的 resident snapshot。
 

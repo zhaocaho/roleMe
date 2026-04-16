@@ -10,6 +10,7 @@ def test_build_skill_creates_artifact_without_scripts(tmp_path):
     assert (artifact / "tools" / "role_ops.py").exists()
     assert (artifact / "tools" / "memory.py").exists()
     assert (artifact / "tools" / "context_router.py").exists()
+    assert (artifact / "tools" / "workflow_index.py").exists()
     assert (artifact / "assets" / "templates" / "AGENT.md").exists()
     assert (artifact / "assets" / "templates" / "interview-planner-system.md").exists()
     assert (artifact / "assets" / "templates" / "persona" / "narrative.md").exists()
@@ -79,6 +80,14 @@ def test_build_skill_includes_workflow_archive_guidance(tmp_path):
 
     assert "帮我总结这个项目的工作方式" in skill_md
     assert "帮我总结成通用的工作方式" in skill_md
+    assert "projects/<project-slug>/workflows/index.md" in skill_md
+    assert "brain/workflows/index.md" in usage_md
+    assert "一个 workflow，一个文件" in skill_md
+    assert "一个 workflow，一个文件" in usage_md
+    assert "workflow.md" not in skill_md
+    assert "workflow.md" not in usage_md
+    assert "general-workflow.md" not in skill_md
+    assert "general-workflow.md" not in usage_md
     assert ".current-role.json" in usage_md
     assert "重新执行 `/roleMe <角色名>`" in usage_md
 

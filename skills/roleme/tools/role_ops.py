@@ -11,6 +11,11 @@ import shutil
 
 from tools.context_router import build_context_snapshot, discover_context_paths
 from tools.memory import write_memory
+from tools.workflow_index import (
+    WorkflowIndexEntry,
+    normalize_workflow_slug,
+    upsert_workflow_index_entry,
+)
 
 
 SCHEMA_VERSION = "1.0"
@@ -120,7 +125,11 @@ class WorkflowArchivePlan:
     role_name: str | None
     project_title: str | None
     project_slug: str | None
+    workflow_slug: str
     workflow_title: str
+    workflow_summary: str
+    workflow_applies_to: str
+    workflow_keywords: list[str]
     workflow_doc_markdown: str
     context_summary_markdown: str
     user_rules: list[str]
@@ -534,6 +543,59 @@ def summarize_index_entry(summary: str) -> str:
     return ""
 
 
+def _first_meaningful_line(text: str) -> str:
+    for raw_line in text.splitlines():
+        line = raw_line.strip(" -#\t")
+        if line:
+            return line
+    return ""
+
+
+def _first_summary_content_line(text: str) -> str:
+    ignored_titles = {"项目上下文", "全局上下文", "适用场景"}
+    for raw_line in text.splitlines():
+        line = raw_line.strip(" -#\t")
+        if not line:
+            continue
+        if line in ignored_titles:
+            continue
+        return line
+    return ""
+
+
+def _derive_workflow_metadata(
+    payload: dict[str, object],
+    workflow_title: str,
+    workflow_slug: str,
+) -> tuple[str, str, list[str]]:
+    context_summary = str(payload.get("context_summary_markdown", "")).strip()
+    context_content = _first_summary_content_line(context_summary)
+    workflow_summary = (
+        str(payload.get("workflow_summary", "")).strip()
+        or context_content
+        or workflow_title
+    )
+    workflow_applies_to = (
+        str(payload.get("workflow_applies_to", "")).strip()
+        or context_content
+        or workflow_title
+    )
+    workflow_keywords = [
+        str(item).strip()
+        for item in payload.get("workflow_keywords", [])
+        if str(item).strip()
+    ]
+    if not workflow_keywords:
+        tokens = re.findall(
+            r"[A-Za-z0-9_]+|[\u4e00-\u9fff]+",
+            f"{workflow_title} {workflow_slug}",
+        )
+        workflow_keywords = list(
+            dict.fromkeys(token.casefold() for token in tokens if token.strip())
+        )
+    return workflow_summary, workflow_applies_to, workflow_keywords
+
+
 def parse_workflow_archive_response(raw: str | dict[str, object]) -> WorkflowArchivePlan:
     payload = json.loads(raw) if isinstance(raw, str) else dict(raw)
     kind = str(payload.get("kind", "")).strip().lower()
@@ -557,13 +619,29 @@ def parse_workflow_archive_response(raw: str | dict[str, object]) -> WorkflowArc
         for item in payload.get("project_memory", [])
         if str(item).strip()
     ]
+    workflow_title = str(payload.get("workflow_title", "")).strip()
+    if not workflow_title:
+        raise ValueError("workflow_title is required.")
+    workflow_slug = (
+        str(payload.get("workflow_slug", "")).strip()
+        or normalize_workflow_slug(workflow_title)
+    )
+    workflow_summary, workflow_applies_to, workflow_keywords = _derive_workflow_metadata(
+        payload,
+        workflow_title,
+        workflow_slug,
+    )
 
     return WorkflowArchivePlan(
         kind=kind,
         role_name=str(payload.get("role_name")).strip() if payload.get("role_name") is not None else None,
         project_title=str(project_title).strip() if project_title is not None else None,
         project_slug=str(project_slug).strip() if project_slug is not None else None,
-        workflow_title=str(payload.get("workflow_title", "")).strip(),
+        workflow_slug=workflow_slug,
+        workflow_title=workflow_title,
+        workflow_summary=workflow_summary,
+        workflow_applies_to=workflow_applies_to,
+        workflow_keywords=workflow_keywords,
         workflow_doc_markdown=str(payload.get("workflow_doc_markdown", "")).strip(),
         context_summary_markdown=str(payload.get("context_summary_markdown", "")).strip(),
         user_rules=user_rules,
@@ -609,13 +687,27 @@ def archive_general_workflow(plan: WorkflowArchivePlan) -> WorkflowArchiveResult
 
     role_path = Path(current.role_path)
     workflow_doc = sanitize_archived_markdown(plan.workflow_doc_markdown)
-    topic_path = role_path / "brain" / "topics" / "general-workflow.md"
-    topic_path.write_text(workflow_doc + "\n", encoding="utf-8")
+    workflows_dir = role_path / "brain" / "workflows"
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+    workflow_filename = f"{plan.workflow_slug}.md"
+    workflow_path = workflows_dir / workflow_filename
+    workflow_path.write_text(workflow_doc + "\n", encoding="utf-8")
+    upsert_workflow_index_entry(
+        workflows_dir / "index.md",
+        WorkflowIndexEntry(
+            slug=plan.workflow_slug,
+            title=plan.workflow_title,
+            file=workflow_filename,
+            applies_to=plan.workflow_applies_to,
+            keywords=tuple(plan.workflow_keywords),
+            summary=plan.workflow_summary,
+        ),
+    )
     upsert_markdown_index_entry(
         role_path / "brain" / "index.md",
-        label=plan.workflow_title,
-        target="topics/general-workflow.md",
-        summary=plan.context_summary_markdown,
+        label="工作流索引",
+        target="workflows/index.md",
+        summary="按需路由全局 workflow。",
     )
     for rule in plan.user_rules:
         write_memory(role_path, target="user", content=sanitize_archive_entry(rule))
@@ -626,7 +718,8 @@ def archive_general_workflow(plan: WorkflowArchivePlan) -> WorkflowArchiveResult
         project_title=None,
         project_slug=None,
         written_paths=[
-            "brain/topics/general-workflow.md",
+            f"brain/workflows/{workflow_filename}",
+            "brain/workflows/index.md",
             "brain/index.md",
             "memory/USER.md",
             "memory/MEMORY.md",
@@ -645,27 +738,45 @@ def archive_project_workflow(plan: WorkflowArchivePlan) -> WorkflowArchiveResult
     role_path = Path(current.role_path)
     project_dir = role_path / "projects" / plan.project_slug
     project_dir.mkdir(parents=True, exist_ok=True)
+    workflows_dir = project_dir / "workflows"
+    workflows_dir.mkdir(parents=True, exist_ok=True)
 
     workflow_doc = sanitize_archived_markdown(plan.workflow_doc_markdown)
-    context_doc = sanitize_archived_markdown(plan.context_summary_markdown)
-    if "workflow.md" not in context_doc:
-        context_doc = context_doc + "\n\n- Workflow: workflow.md"
-
-    (project_dir / "workflow.md").write_text(workflow_doc + "\n", encoding="utf-8")
+    workflow_filename = f"{plan.workflow_slug}.md"
+    (workflows_dir / workflow_filename).write_text(workflow_doc + "\n", encoding="utf-8")
+    upsert_workflow_index_entry(
+        workflows_dir / "index.md",
+        WorkflowIndexEntry(
+            slug=plan.workflow_slug,
+            title=plan.workflow_title,
+            file=workflow_filename,
+            applies_to=plan.workflow_applies_to,
+            keywords=tuple(plan.workflow_keywords),
+            summary=plan.workflow_summary,
+        ),
+    )
+    context_doc = (
+        sanitize_archived_markdown(plan.context_summary_markdown)
+        if plan.context_summary_markdown
+        else f"# {plan.project_title}\n\n项目上下文待补充。"
+    )
+    if "- 工作流索引: workflows/index.md" not in context_doc:
+        context_doc = context_doc.rstrip() + "\n\n- 工作流索引: workflows/index.md"
     (project_dir / "context.md").write_text(context_doc.strip() + "\n", encoding="utf-8")
     append_unique_project_memory(project_dir / "memory.md", plan.project_memory)
     upsert_markdown_index_entry(
         role_path / "projects" / "index.md",
         label=plan.project_title,
         target=f"projects/{plan.project_slug}/context.md",
-        summary="记录项目上下文与 workflow 入口。",
+        summary="记录项目上下文与 workflow 索引入口。",
     )
     return WorkflowArchiveResult(
         role_name=current.role_name,
         project_title=plan.project_title,
         project_slug=plan.project_slug,
         written_paths=[
-            f"projects/{plan.project_slug}/workflow.md",
+            f"projects/{plan.project_slug}/workflows/{workflow_filename}",
+            f"projects/{plan.project_slug}/workflows/index.md",
             f"projects/{plan.project_slug}/context.md",
             f"projects/{plan.project_slug}/memory.md",
             "projects/index.md",
