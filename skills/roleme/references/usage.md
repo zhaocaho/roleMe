@@ -70,6 +70,13 @@
 - `memory/USER.md`
 - `memory/MEMORY.md`
 
+另外，冻结快照会在上述常驻文件之后，尽量追加两类轻量摘要，而不是 workflow 正文：
+
+- 当前项目的 workflow summaries：来自 `projects/<current-project>/workflows/index.md`
+- 通用 workflow summaries：来自 `brain/workflows/index.md`
+
+这些摘要只有在索引文件存在且能被 `tools/workflow_index.py` 解析时才会进入快照。
+
 ### 按需层
 
 这些内容只在需要时展开：
@@ -92,6 +99,8 @@
 ### 冻结快照
 
 角色激活时，会基于常驻层生成当前会话使用的冻结快照。
+
+这里的“冻结快照”不只包含常驻文件正文；如果当前项目和全局 workflow 索引可解析，还会附带对应的 workflow summary sections，帮助后续对话在不加载 workflow 正文的情况下先拿到稳定入口。
 
 这意味着：
 
