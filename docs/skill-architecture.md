@@ -2,6 +2,8 @@
 
 本文档描述当前 lean v1 架构，目标是在保持渐进式披露和 Hermes 核心记忆原则的同时，避免把 v1 过度工程化。
 
+相关产品视角文档：[`product-module-boundary.md`](product-module-boundary.md)
+
 ## 设计原则
 
 ### 1. 声明优先

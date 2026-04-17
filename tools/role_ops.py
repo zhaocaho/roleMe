@@ -11,7 +11,7 @@ import shutil
 import tempfile
 
 from tools.context_router import build_context_snapshot, discover_context_paths
-from tools.memory import write_memory
+from tools.memory import build_frozen_snapshot, write_memory
 from tools.workflow_index import (
     WorkflowIndexEntry,
     normalize_workflow_slug,
@@ -96,6 +96,7 @@ class RoleBundle:
     role_path: str
     resident_files: dict[str, str]
     on_demand_paths: list[str]
+    context_snapshot: str
 
 
 @dataclass(frozen=True)
@@ -1538,11 +1539,13 @@ def load_role_bundle(role_name: str) -> RoleBundle:
     }
     set_current_role_state(role_name)
     maybe_bootstrap_project_from_cwd(base_path)
+    context_snapshot = build_frozen_snapshot(base_path)
     return RoleBundle(
         role_name=role_name,
         role_path=str(base_path),
         resident_files=resident_files,
         on_demand_paths=ON_DEMAND_PATHS,
+        context_snapshot=context_snapshot,
     )
 
 
