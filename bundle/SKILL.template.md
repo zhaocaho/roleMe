@@ -22,6 +22,8 @@ description: Use when the user wants to initialize, switch, inspect, optimize, e
 运行时原则：
 
 - `roleMe` 管理的是用户角色上下文，不是助手人格切换。
+- 角色包默认保存在 `~/.roleMe/<角色名>/`；不要去 `~/.agents/skills/roleme/roles/` 之类的 skill 安装目录猜路径。
+- 需要列出现有角色或判断角色是否存在时，应以 `tools/role_ops.py` 的 `list_roles()` 与 `role_dir()` 语义为准，不要手写 shell 路径探测。
 - 未被结构化写入角色包的上下文，不应假定模型已经知道；稳定信息应落到 `persona/`、`memory/`、`brain/`、`projects/` 中可检索的位置。
 - 常驻层与渐进层的边界由角色包内的 `AGENT.md` 决定。
 - 常驻层应保持最小且稳定；细节、专题知识与项目上下文优先按需展开，而不是堆进单个总说明。
@@ -42,6 +44,7 @@ description: Use when the user wants to initialize, switch, inspect, optimize, e
 - 判断不够确定时，优先写入 `memory/episodes/` 或项目记忆，不轻易提升到 `memory/USER.md` 与 `memory/MEMORY.md`。
 - 项目级 workflow 写入 `projects/<project-slug>/workflows/index.md` 与 `projects/<project-slug>/workflows/<workflow-slug>.md`；通用 workflow 写入 `brain/workflows/index.md` 与 `brain/workflows/<workflow-slug>.md`；`context.md` 与 `brain/index.md` 只保留到工作流索引的入口，一个 workflow，一个文件，并将稳定规则提升到 `memory/USER.md` 与 `memory/MEMORY.md`。
 - 当前角色以 `ROLEME_HOME/.current-role.json` 为准；自然语言归档只能写当前角色。
+- 如果角色目录所在位置不可写，可用 `ROLEME_STATE_HOME` 指定当前角色状态文件的可写目录；未配置时，运行时会退回系统临时目录下的 `roleMe-state/`。
 - 如果归档提升了 resident 规则或摘要，应提醒用户重新执行 `/roleMe <角色名>` 才会刷新当前会话底座。
 - `optimize` 与 `doctor` 应优先发现和修复角色包的熵增问题，例如重复记忆、索引失效、resident/on-demand 边界漂移。
 - 只有确定性的文件操作才调用 `tools/role_ops.py`、`tools/memory.py`、`tools/context_router.py`。

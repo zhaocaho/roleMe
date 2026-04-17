@@ -8,6 +8,10 @@
 ~/.roleMe/<角色名>/
 ```
 
+角色包不保存在 skill 安装目录里。不要检查 `~/.agents/skills/roleme/roles/` 这类路径；列举角色或判断角色是否存在时，应以 `tools/role_ops.py` 的 `list_roles()` / `role_dir()` 语义为准。
+
+当前角色指针默认写入 `ROLEME_HOME/.current-role.json`。如果角色目录所在位置只读，可用 `ROLEME_STATE_HOME` 指定一个可写状态目录；未配置时，运行时会退回系统临时目录下的 `roleMe-state/`。
+
 加载角色以后，不是让模型变成这个角色，而是让你在当前对话里以这个角色的身份被理解。助手仍然是助手，但会优先通过这个角色的身份、记忆、知识和项目上下文来理解你。
 
 ## 基本命令

@@ -2,6 +2,7 @@ from pathlib import Path
 import pytest
 import re
 
+import tools.role_ops as role_ops
 from tools.context_router import discover_context_paths
 from tools.role_ops import (
     ProjectIdentity,
@@ -143,6 +144,61 @@ def test_load_query_context_bundle_refreshes_current_role_state(tmp_role_home):
     state = get_current_role_state()
 
     assert state.role_name == "self"
+
+
+def test_load_role_bundle_falls_back_to_temp_state_home_when_role_home_is_not_writable(
+    tmp_role_home,
+    tmp_path,
+    monkeypatch,
+):
+    initialize_role("self", skill_version="0.1.0")
+    fallback_root = tmp_path / "state-cache"
+    original_directory_writable = role_ops._directory_writable
+
+    monkeypatch.setattr(role_ops.tempfile, "gettempdir", lambda: str(fallback_root))
+    monkeypatch.setattr(
+        role_ops,
+        "_directory_writable",
+        lambda path: False if Path(path) == tmp_role_home else original_directory_writable(path),
+    )
+
+    load_role_bundle("self")
+
+    state_path = fallback_root / "roleMe-state" / ".current-role.json"
+    assert state_path.exists()
+
+    state = get_current_role_state()
+    assert state.role_name == "self"
+    assert Path(state.role_path) == tmp_role_home / "self"
+
+
+def test_load_role_bundle_skips_project_bootstrap_when_role_home_is_not_writable(
+    tmp_role_home,
+    tmp_path,
+    monkeypatch,
+):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    fallback_root = tmp_path / "state-cache"
+    repo_root = tmp_path / "roleMe"
+    repo_root.mkdir()
+    (repo_root / ".git").mkdir()
+    monkeypatch.chdir(repo_root)
+
+    original_directory_writable = role_ops._directory_writable
+    monkeypatch.setattr(role_ops.tempfile, "gettempdir", lambda: str(fallback_root))
+    monkeypatch.setattr(
+        role_ops,
+        "_directory_writable",
+        lambda path: False if tmp_role_home in Path(path).parents or Path(path) == tmp_role_home else original_directory_writable(path),
+    )
+
+    bundle = load_role_bundle("self")
+
+    assert bundle.role_name == "self"
+    assert not (role_path / "projects" / "roleme").exists()
+    assert "projects/roleme/context.md" not in (
+        role_path / "projects" / "index.md"
+    ).read_text(encoding="utf-8")
 
 
 def test_get_current_role_state_requires_valid_pointer(tmp_role_home):

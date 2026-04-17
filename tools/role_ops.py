@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 
 from tools.context_router import build_context_snapshot, discover_context_paths
 from tools.memory import write_memory
@@ -292,6 +293,25 @@ def roleme_home() -> Path:
     return Path(override).expanduser() if override else Path.home() / ".roleMe"
 
 
+def _directory_writable(path: Path) -> bool:
+    target = path.expanduser()
+    while not target.exists() and target.parent != target:
+        target = target.parent
+    return os.access(target, os.W_OK | os.X_OK)
+
+
+def roleme_state_home() -> Path:
+    override = os.environ.get("ROLEME_STATE_HOME")
+    if override:
+        return Path(override).expanduser()
+
+    home = roleme_home()
+    if _directory_writable(home):
+        return home
+
+    return Path(tempfile.gettempdir()) / "roleMe-state"
+
+
 def normalize_role_name(role_name: str) -> str:
     normalized = role_name.strip()
     if not normalized:
@@ -307,8 +327,14 @@ def role_dir(role_name: str) -> Path:
     return roleme_home() / normalize_role_name(role_name)
 
 
+def current_role_state_paths() -> list[Path]:
+    preferred = roleme_state_home() / ".current-role.json"
+    legacy = roleme_home() / ".current-role.json"
+    return [preferred] if preferred == legacy else [preferred, legacy]
+
+
 def current_role_state_path() -> Path:
-    return roleme_home() / ".current-role.json"
+    return current_role_state_paths()[0]
 
 
 def set_current_role_state(role_name: str) -> CurrentRoleState:
@@ -327,7 +353,9 @@ def set_current_role_state(role_name: str) -> CurrentRoleState:
         "rolePath": state.role_path,
         "loadedAt": state.loaded_at,
     }
-    current_role_state_path().write_text(
+    state_path = current_role_state_path()
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
@@ -335,23 +363,29 @@ def set_current_role_state(role_name: str) -> CurrentRoleState:
 
 
 def get_current_role_state() -> CurrentRoleState:
-    path = current_role_state_path()
-    if not path.exists():
-        raise FileNotFoundError("No current role is loaded.")
+    invalid_pointer_found = False
+    for path in current_role_state_paths():
+        if not path.exists():
+            continue
 
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    role_name = normalize_role_name(str(payload.get("roleName", "")).strip())
-    role_path = Path(str(payload.get("rolePath", "")).strip())
-    loaded_at = str(payload.get("loadedAt", "")).strip()
-    expected_path = role_dir(role_name)
-    if role_path != expected_path or not expected_path.exists() or not loaded_at:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        role_name = normalize_role_name(str(payload.get("roleName", "")).strip())
+        role_path = Path(str(payload.get("rolePath", "")).strip())
+        loaded_at = str(payload.get("loadedAt", "")).strip()
+        expected_path = role_dir(role_name)
+        if role_path != expected_path or not expected_path.exists() or not loaded_at:
+            invalid_pointer_found = True
+            continue
+
+        return CurrentRoleState(
+            role_name=role_name,
+            role_path=str(expected_path),
+            loaded_at=loaded_at,
+        )
+
+    if invalid_pointer_found:
         raise ValueError("Current role pointer is invalid.")
-
-    return CurrentRoleState(
-        role_name=role_name,
-        role_path=str(expected_path),
-        loaded_at=loaded_at,
-    )
+    raise FileNotFoundError("No current role is loaded.")
 
 
 def build_default_role_entry_prompt(user_language: str = "中文") -> RoleEntryPrompt:
@@ -473,6 +507,9 @@ def _write_if_missing(path: Path, content: str) -> None:
 
 
 def maybe_bootstrap_project_from_cwd(role_path: Path) -> ProjectIdentity | None:
+    if not _directory_writable(role_path):
+        return None
+
     repo_root = _current_git_repo_root()
     if repo_root is None:
         return None

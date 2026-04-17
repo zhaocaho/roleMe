@@ -109,6 +109,16 @@ def test_build_skill_includes_harness_readability_guidance(tmp_path):
     assert "更适合被智能体消费的上下文" in usage_md
 
 
+def test_build_skill_includes_role_storage_guidance(tmp_path):
+    artifact = build_skill(output_root=tmp_path)
+    skill_md = (artifact / "SKILL.md").read_text(encoding="utf-8")
+    usage_md = (artifact / "references" / "usage.md").read_text(encoding="utf-8")
+
+    assert "不要去 `~/.agents/skills/roleme/roles/`" in skill_md
+    assert "角色包不保存在 skill 安装目录里" in usage_md
+    assert "ROLEME_STATE_HOME" in usage_md
+
+
 def test_build_skill_includes_natural_language_archive_guidance(tmp_path):
     artifact = build_skill(output_root=tmp_path)
     skill_md = (artifact / "SKILL.md").read_text(encoding="utf-8")
