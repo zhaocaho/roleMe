@@ -109,10 +109,12 @@ indexes/*      派生索引，可删除重建，不是权威数据源
 
 ```text
 schema.yaml 必须声明 graph_schema_version
-nodes.jsonl / edges.jsonl 中的对象必须带 schema_version 或由文件级 schema_version 约束
+nodes.jsonl / edges.jsonl 中的每个 node / edge 对象必须带 schema_version
 indexes/* 必须带 index_version；版本不匹配时直接重建
 role.json 的 schemaVersion 仍表示角色包版本，不替代 Graph schema 版本
 ```
+
+JSONL 文件不使用文件头或混合 metadata 行，保持“每行一个 node / edge 对象”的解析模型。若未来需要表达 Graph 数据集级别元信息，应新增 `brain/graph/manifest.json`，不得把 manifest 混入 nodes / edges JSONL。
 
 正文仍保存在现有 markdown 结构中：
 
@@ -439,6 +441,8 @@ markdown marker 内条目内容 hash
 
 没有 `entry_key` 时，不得为同一 path 内的多条内容创建多个同类型节点。doctor 必须报告 entry-backed 类型缺少 `metadata.entry_key` 的节点，避免同一文件内的多条偏好、原则、记忆或决策被错误合并。
 
+新 Archive 产生的 entry-backed 条目必须把稳定定位信息写回 markdown 正文，例如使用显式 block id、heading path 或内部 markdown marker。该 marker 是后台约束，用户不需要理解或维护；普通对话、普通归档和普通编辑方式不改变。旧条目在 optimize 回填时如果无法稳定定位，只报告建议，不强行迁移为 active 节点，也不依赖内容 hash 建立长期 active 绑定。
+
 ### 路径规则
 
 ```text
@@ -512,6 +516,8 @@ archive_result:
 ```
 
 现有 `WorkflowArchiveResult` 可以兼容保留，但内部归档流程应使用更完整的 `ArchiveResult` 或等价结构。所有 workflow、memory、episode、project bootstrap 和 topic archive 入口都必须能返回或记录 partial state。
+
+调用层不得吞掉 partial state。任何自然语言归档、workflow 归档或项目 bootstrap 入口收到 `index_updated=false`、`graph_updated=false` 或非空 `doctor_warnings` 时，都必须在后台保留结构化结果，并在用户回执中用简短语言说明“正文已写入，但后台索引/Graph 未完全同步”。不得在 Graph 写入失败时只返回“已归档”这类完整成功回执。该提示只说明后台同步状态，不要求用户理解或手动维护 Graph。
 
 文件写入要求：
 
@@ -649,6 +655,8 @@ GraphRecallResult:
 
 `discover_context_paths()` 可以继续作为对外兼容接口返回 path list，但必须由内部 `GraphRecallResult` 经 trust filter、弱召回 gate 和 fallback 合并后再压平成 path，避免在进入 `build_context_snapshot()` 前丢失可信度信息。
 
+Graph Recall 是后台增强，不改变用户自然表达任务的方式。用户不需要知道节点、边、分数、强弱召回或 Graph 开关；只有当后台发现高风险冲突、多个 workflow 分差过小，或低置信知识会影响重要行为时，才用自然语言询问用户确认。
+
 流程：
 
 ```text
@@ -759,6 +767,28 @@ missing_path for path-backed node: block and doctor warning
 ```
 
 当第一名和第二名分差过小时，系统应回退旧路由或请求澄清，而不是强行加载错误 workflow。
+
+Graph 与旧 markdown 路由的候选合并规则：
+
+```text
+Graph 健康且 archive/routing 均开启：
+  Graph 强候选优先，但必须合并旧 workflow index / brain index / project index 的强命中
+
+Graph 缺失、损坏、schema 不兼容、索引重建失败：
+  跳过 Graph，完全使用旧 markdown 路由
+
+Graph 可能 stale：
+  包括 ROLEME_GRAPH_ARCHIVE=0、Graph schema/index 版本落后、Graph 缺少最近写入标记或 doctor 报告 markdown 已写入但 Graph 缺失
+  旧 markdown index 命中必须作为强候选参与排序
+  Graph 不得单方面过滤掉新写入的 markdown 内容
+
+Graph 命中与 markdown 命中冲突：
+  active/high confidence Graph 节点可以提高候选排序
+  但不得覆盖用户当前明确指令
+  分差过小或冲突会影响重要执行路径时，询问用户确认
+```
+
+`discover_context_paths()` 最终仍只返回 path list，兼容现有调用方；trust flags、stale 标记和冲突原因在内部保留，用于决定是否询问、降权或回退。
 
 ## Trust 校验协议
 
@@ -1085,6 +1115,8 @@ optimize 只执行确定性修复：
 生成但不自动执行需要用户确认的建议
 ```
 
+optimize 的所有修复都是后台维护动作，不改变用户正常交流方式。它不得要求用户理解节点、边或 entry_key；只有涉及提升、废弃、冲突解决、历史证据删除等语义判断时，才生成建议并等待用户确认。
+
 ## 与现有架构集成
 
 Context Graph 对现有架构的影响应控制为增量式：
@@ -1217,6 +1249,8 @@ ROLEME_GRAPH_ARCHIVE=0:
 
 当 `ROLEME_GRAPH_ARCHIVE=0` 且 `ROLEME_GRAPH_ROUTING` 仍开启时，Recall 必须把 Graph 视为可能 stale 的候选索引，而不是完整事实来源。此时 context_router 必须保留 markdown fallback，不得仅凭 Graph 命中结果排除新写入的 markdown 内容。
 
+开关行为必须保持后台化。除非用户显式询问诊断、来源、开关状态或出现需要确认的冲突，系统不得在普通交流中向用户解释 Graph routing / archive 的内部细节。
+
 ## doctor / optimize
 
 doctor 应检查：
@@ -1242,14 +1276,29 @@ optimize 可执行确定性修复：
 
 ```text
 重建 indexes/*
-删除失效 File 节点
+标记或移除失效 File 节点
 清理孤儿边
 合并重复节点
 修复 workflow index 与 Graph 状态不一致
 把已被 superseded 的节点从默认召回中移除
 从 workflow index、brain index、memory 条目回填缺失 Graph 节点
-移除与强语义节点同路径的冗余 File 节点
+合并或移除与强语义节点同路径的冗余 File 节点
 为可稳定定位的 entry-backed 条目补齐 metadata.entry_key
+```
+
+`File` 节点修复必须保守：
+
+```text
+仍被 Evidence / Decision / Episode / supersedes / derived_from 等历史链路引用的 File：
+  不得物理删除，只能标记为 superseded / archived 或迁移引用后再处理
+
+与强语义节点同 path 的冗余 File：
+  优先把入边迁移到强语义节点，或把 File 标记为 superseded
+  只有确认无入边、无证据依赖、无历史追溯价值时，才能物理删除
+
+path 已失效的 File：
+  doctor 报告 warning
+  optimize 只在无历史引用时删除；有历史引用时保留节点并标记 stale / archived
 ```
 
 Archive 出现 partial state 后，doctor 必须能报告 markdown 已写入但 Graph 缺失的对象；optimize 必须能在不改写正文语义的前提下补齐 Graph。Graph 修复失败不得阻塞现有渐进式披露和旧路由。
@@ -1295,6 +1344,9 @@ graph_index.optimize_graph(role_path) 只做确定性修复
 - indexes 缺失或损坏时可由 nodes/edges 重建
 - 归档主题知识时，主题文档只创建 `Topic`，不为同一路径额外创建 `File`
 - 编辑 entry-backed 条目正文时，不因 content hash 变化静默创建新的 active 节点
+- 新 Archive 产生的 entry-backed 条目会写入稳定 markdown marker，旧条目无法稳定定位时 optimize 只报告建议
+- 自然语言归档入口在 Graph partial failure 时不会返回完整成功回执
+- 生产代码中关键角色包写入不得直接调用 `Path.write_text()`，必须通过公共 atomic write API；测试、临时夹具和非角色包输出可列入允许清单
 
 ### 召回测试
 
@@ -1309,6 +1361,8 @@ graph_index.optimize_graph(role_path) 只做确定性修复
 - 弱召回未触发时，Memory / Episode / Decision / Topic / File 不进入正文加载预算
 - `ROLEME_GRAPH_ROUTING=0` 时完全使用旧路由，但不影响 markdown 写入
 - `ROLEME_GRAPH_ARCHIVE=0` 时不写 Graph，但仍能写 markdown 正文和 markdown index
+- Graph 可能 stale 时，旧 markdown index 命中作为强候选参与排序，Graph 不得过滤掉新 markdown
+- Graph routing / archive 细节不出现在普通用户交流中，除非用户询问诊断、来源、开关状态或需要确认冲突
 
 ### Trust 测试
 
@@ -1379,12 +1433,15 @@ Graph 写入失败时，markdown 归档仍可成功，但回执必须报告 Grap
 ```text
 entry_key:
   优先使用显式 block id、heading path 或归档生成 entry slug
+  新归档的 entry-backed 条目必须把稳定 marker 写回 markdown
   内容 hash 只作为旧条目导入兜底
+  旧条目无法稳定定位时只报告建议，不强行建 active 节点
   正文编辑不得静默生成新的 active 节点
 
 recall fallback:
   Graph Recall 必须保留旧路由 fallback
   Graph 损坏、缺失、stale、分差过小、ARCHIVE 关闭时都不得只信 Graph
+  Graph 可能 stale 时，markdown index 强命中必须进入候选集合
 
 weak recall:
   Memory / Episode / Decision / Topic / File 默认不进入正文预算
@@ -1401,7 +1458,13 @@ atomic write:
 doctor optimize:
   doctor 只报告
   optimize 只做确定性修复
+  File 节点删除必须保守，保留仍被历史链路引用的来源节点
   需要用户确认的提升、废弃、冲突处理只生成建议
+
+user experience:
+  Graph 是后台机制，不改变用户自然交流和归档方式
+  普通对话不暴露 Graph routing / archive / entry_key 细节
+  只有高风险冲突、低置信知识影响重要行为、或用户显式询问诊断来源时才说明后台状态
 ```
 
 ### 中风险实现点
