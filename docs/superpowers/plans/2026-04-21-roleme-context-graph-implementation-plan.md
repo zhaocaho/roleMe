@@ -707,7 +707,7 @@ class GraphOptimizeResult:
 
 预期：通过。
 
-- [ ] **步骤 6：提交**
+- [x] **步骤 6：提交**
 
 ```bash
 git add tools/graph_index.py tests/test_graph_index.py
@@ -1103,25 +1103,25 @@ git commit -m "feat: add graph assisted context recall"
 - 修改：回归中发现的问题文件
 - 生成更新：`skills/roleme/`
 
-- [ ] **步骤 1：运行全量测试**
+- [x] **步骤 1：运行全量测试**
 
 运行：`python3 -m pytest -v`
 
 预期：通过。
 
-- [ ] **步骤 2：运行静态写入约束测试**
+- [x] **步骤 2：运行静态写入约束测试**
 
 运行：`python3 -m pytest tests/test_repo_scripts.py::test_critical_role_tools_do_not_write_role_files_directly -v`
 
 预期：通过。
 
-- [ ] **步骤 3：发布 skill 包**
+- [x] **步骤 3：发布 skill 包**
 
 运行：`python3 scripts/build_skill.py`
 
 预期：`skills/roleme/` 包含 Graph runtime 和 schema。
 
-- [ ] **步骤 4：发布后回归**
+- [x] **步骤 4：发布后回归**
 
 运行：`python3 -m pytest tests/test_repo_scripts.py tests/integration/test_role_roundtrip.py -v`
 
