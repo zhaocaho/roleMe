@@ -1,6 +1,8 @@
 from scripts.build_skill import build_skill, publish_skill
 from pathlib import Path
 import runpy
+import subprocess
+import sys
 
 
 def test_critical_role_tools_do_not_write_role_files_directly():
@@ -92,6 +94,29 @@ def test_validate_role_exits_nonzero_for_graph_warning(tmp_role_home, monkeypatc
 
     output = capsys.readouterr().out
     assert "orphan edge source" in output
+
+
+def test_validate_role_script_imports_tools_when_run_by_path(tmp_role_home, tmp_path):
+    from tools.role_ops import initialize_role
+
+    initialize_role("self", skill_version="0.1.0")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path.cwd() / "scripts" / "validate_role.py"),
+            "self",
+        ],
+        cwd=tmp_path,
+        env={"ROLEME_HOME": str(tmp_role_home)},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert "ModuleNotFoundError" not in result.stderr
+    assert result.returncode == 0
+    assert "ok: self" in result.stdout
 
 
 def test_build_skill_ignores_python_cache_files(tmp_path, monkeypatch):

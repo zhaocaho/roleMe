@@ -3,6 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tools.file_ops import atomic_write_json, atomic_write_text
 from tools.role_ops import role_dir, templates_dir
