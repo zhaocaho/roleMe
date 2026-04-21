@@ -11,6 +11,7 @@ import shutil
 import tempfile
 
 from tools.context_router import build_context_snapshot, discover_context_paths
+from tools.file_ops import atomic_write_json, atomic_write_text
 from tools.memory import build_frozen_snapshot, write_memory
 from tools.workflow_index import (
     WorkflowIndexEntry,
@@ -84,10 +85,7 @@ class RoleManifest:
             "updatedAt": self.updated_at,
             "defaultLoadProfile": self.default_load_profile,
         }
-        path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
+        atomic_write_json(path, payload)
 
 
 @dataclass(frozen=True)
@@ -355,11 +353,7 @@ def set_current_role_state(role_name: str) -> CurrentRoleState:
         "loadedAt": state.loaded_at,
     }
     state_path = current_role_state_path()
-    state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_json(state_path, payload)
     return state
 
 
@@ -417,7 +411,7 @@ def build_default_role_entry_prompt(user_language: str = "中文") -> RoleEntryP
 def _render(source: Path, destination: Path, role_name: str) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     content = source.read_text(encoding="utf-8").replace("<role-name>", role_name)
-    destination.write_text(content, encoding="utf-8")
+    atomic_write_text(destination, content)
 
 
 def _render_template_text(source: Path, replacements: dict[str, str]) -> str:
@@ -452,7 +446,7 @@ def _replace_marker_entries(path: Path, entries: list[str]) -> None:
         + "\n<!-- ROLEME:ENTRIES:END -->"
         + text.split("<!-- ROLEME:ENTRIES:END -->", maxsplit=1)[1]
     )
-    path.write_text(updated, encoding="utf-8")
+    atomic_write_text(path, updated)
 
 
 def _slugify(value: str) -> str:
@@ -504,7 +498,7 @@ def _current_git_repo_root() -> Path | None:
 
 def _write_if_missing(path: Path, content: str) -> None:
     if not path.exists():
-        path.write_text(content, encoding="utf-8")
+        atomic_write_text(path, content)
 
 
 def maybe_bootstrap_project_from_cwd(role_path: Path) -> ProjectIdentity | None:
@@ -699,7 +693,7 @@ def upsert_markdown_index_entry(index_path: Path, label: str, target: str, summa
         lines.extend([entry_line, f"  - {summary_line}"])
     else:
         lines.append(entry_line)
-    index_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
+    atomic_write_text(index_path, "\n".join(lines).strip() + "\n")
 
 
 def append_unique_project_memory(memory_path: Path, entries: list[str]) -> None:
@@ -715,7 +709,7 @@ def append_unique_project_memory(memory_path: Path, entries: list[str]) -> None:
         if bullet not in existing:
             lines.append(bullet)
             existing.add(bullet)
-    memory_path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
+    atomic_write_text(memory_path, "\n".join(lines).strip() + "\n")
 
 
 def archive_general_workflow(plan: WorkflowArchivePlan) -> WorkflowArchiveResult:
@@ -729,7 +723,7 @@ def archive_general_workflow(plan: WorkflowArchivePlan) -> WorkflowArchiveResult
     workflows_dir.mkdir(parents=True, exist_ok=True)
     workflow_filename = f"{plan.workflow_slug}.md"
     workflow_path = workflows_dir / workflow_filename
-    workflow_path.write_text(workflow_doc + "\n", encoding="utf-8")
+    atomic_write_text(workflow_path, workflow_doc + "\n")
     upsert_workflow_index_entry(
         workflows_dir / "index.md",
         WorkflowIndexEntry(
@@ -781,7 +775,7 @@ def archive_project_workflow(plan: WorkflowArchivePlan) -> WorkflowArchiveResult
 
     workflow_doc = sanitize_archived_markdown(plan.workflow_doc_markdown)
     workflow_filename = f"{plan.workflow_slug}.md"
-    (workflows_dir / workflow_filename).write_text(workflow_doc + "\n", encoding="utf-8")
+    atomic_write_text(workflows_dir / workflow_filename, workflow_doc + "\n")
     upsert_workflow_index_entry(
         workflows_dir / "index.md",
         WorkflowIndexEntry(
@@ -800,7 +794,7 @@ def archive_project_workflow(plan: WorkflowArchivePlan) -> WorkflowArchiveResult
     )
     if "- 工作流索引: workflows/index.md" not in context_doc:
         context_doc = context_doc.rstrip() + "\n\n- 工作流索引: workflows/index.md"
-    (project_dir / "context.md").write_text(context_doc.strip() + "\n", encoding="utf-8")
+    atomic_write_text(project_dir / "context.md", context_doc.strip() + "\n")
     append_unique_project_memory(project_dir / "memory.md", plan.project_memory)
     upsert_markdown_index_entry(
         role_path / "projects" / "index.md",
@@ -1470,21 +1464,21 @@ def initialize_role_from_interview(
     role_name = normalize_role_name(role_name)
     destination = initialize_role(role_name=role_name, skill_version=skill_version)
 
-    (destination / "persona" / "narrative.md").write_text(
+    atomic_write_text(
+        destination / "persona" / "narrative.md",
         f"# 人物自述\n\n{interview.narrative.strip()}\n",
-        encoding="utf-8",
     )
-    (destination / "persona" / "communication-style.md").write_text(
+    atomic_write_text(
+        destination / "persona" / "communication-style.md",
         f"# 沟通风格\n\n{interview.communication_style.strip()}\n",
-        encoding="utf-8",
     )
-    (destination / "persona" / "decision-rules.md").write_text(
+    atomic_write_text(
+        destination / "persona" / "decision-rules.md",
         f"# 决策规则\n\n{interview.decision_rules.strip()}\n",
-        encoding="utf-8",
     )
-    (destination / "persona" / "disclosure-layers.md").write_text(
+    atomic_write_text(
+        destination / "persona" / "disclosure-layers.md",
         f"# 披露层级\n\n{interview.disclosure_layers.strip()}\n",
-        encoding="utf-8",
     )
 
     _replace_marker_entries(destination / "memory" / "USER.md", interview.user_memory)
@@ -1493,38 +1487,38 @@ def initialize_role_from_interview(
     brain_index_lines = ["# 知识索引", ""]
     for topic in interview.brain_topics:
         topic_path = destination / "brain" / "topics" / f"{topic.slug}.md"
-        topic_path.write_text(topic.content.strip() + "\n", encoding="utf-8")
+        atomic_write_text(topic_path, topic.content.strip() + "\n")
         brain_index_lines.append(f"- {topic.title}: topics/{topic.slug}.md")
         if topic.summary:
             brain_index_lines.append(f"  - {topic.summary}")
-    (destination / "brain" / "index.md").write_text(
+    atomic_write_text(
+        destination / "brain" / "index.md",
         "\n".join(brain_index_lines).strip() + "\n",
-        encoding="utf-8",
     )
 
     project_index_lines = ["# 项目索引", ""]
     for project in interview.projects:
         project_dir = destination / "projects" / project.name
         project_dir.mkdir(parents=True, exist_ok=True)
-        (project_dir / "context.md").write_text(
+        atomic_write_text(
+            project_dir / "context.md",
             f"# {project.name}\n\n{project.context.strip()}\n",
-            encoding="utf-8",
         )
-        (project_dir / "overlay.md").write_text(
+        atomic_write_text(
+            project_dir / "overlay.md",
             f"# {project.name} overlay\n\n{project.overlay.strip()}\n",
-            encoding="utf-8",
         )
         memory_lines = [f"# {project.name} memory", ""]
         for item in project.memory or []:
             memory_lines.append(f"- {item}")
-        (project_dir / "memory.md").write_text(
+        atomic_write_text(
+            project_dir / "memory.md",
             "\n".join(memory_lines).strip() + "\n",
-            encoding="utf-8",
         )
         project_index_lines.append(f"- {project.name}: projects/{project.name}/context.md")
-    (destination / "projects" / "index.md").write_text(
+    atomic_write_text(
+        destination / "projects" / "index.md",
         "\n".join(project_index_lines).strip() + "\n",
-        encoding="utf-8",
     )
 
     return destination

@@ -1,4 +1,20 @@
 from scripts.build_skill import build_skill, publish_skill
+from pathlib import Path
+
+
+def test_critical_role_tools_do_not_write_role_files_directly():
+    checked_files = [
+        Path("tools/workflow_index.py"),
+        Path("tools/memory.py"),
+        Path("tools/role_ops.py"),
+    ]
+    offenders: list[str] = []
+    for path in checked_files:
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if ".write_text(" in line:
+                offenders.append(f"{path}:{lineno}:{line.strip()}")
+
+    assert offenders == []
 
 
 def test_build_skill_creates_artifact_without_scripts(tmp_path):

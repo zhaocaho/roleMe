@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import re
 
+from tools.file_ops import atomic_write_text
 from tools.workflow_index import WorkflowIndexEntry, parse_workflow_index
 
 
@@ -41,7 +42,7 @@ def _replace_entries(path: Path, entries: list[str]) -> None:
         + ENTRY_END
         + text.split(ENTRY_END, maxsplit=1)[1]
     )
-    path.write_text(updated, encoding="utf-8")
+    atomic_write_text(path, updated)
 
 
 def _is_safe(text: str) -> bool:
@@ -167,7 +168,7 @@ def write_memory(role_path: Path, target: str, content: str):
     if target == "episode":
         episodes_dir = role_path / "memory" / "episodes"
         episode_path = episodes_dir / f"episode-{len(list(episodes_dir.glob('*.md'))) + 1:03d}.md"
-        episode_path.write_text(content.strip() + "\n", encoding="utf-8")
+        atomic_write_text(episode_path, content.strip() + "\n")
         return episode_path
 
     store_path = _store_path(role_path, target)
