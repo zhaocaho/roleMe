@@ -381,8 +381,11 @@ def _evidence_backed_edge_ids(nodes: list[NodeRecord], edges: list[EdgeRecord]) 
 
 
 def doctor_graph(role_path: Path) -> GraphDoctorReport:
-    graph = load_graph(role_path)
     warnings: list[str] = []
+    try:
+        graph = load_graph(role_path)
+    except Exception as exc:
+        return GraphDoctorReport(warnings=[f"graph load failed: {exc}"])
 
     node_ids = [node.id for node in graph.nodes]
     edge_ids = [edge.id for edge in graph.edges]

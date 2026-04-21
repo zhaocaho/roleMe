@@ -349,6 +349,19 @@ def test_doctor_role_includes_graph_warnings(tmp_role_home):
     assert "orphan edge target: edge-orphan -> missing-target" in report.warnings
 
 
+def test_doctor_role_reports_corrupt_graph_jsonl_as_warning(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    (role_path / "brain" / "graph" / "nodes.jsonl").write_text(
+        "{bad json\n",
+        encoding="utf-8",
+    )
+
+    report = doctor_role("self")
+
+    assert report.missing_files == []
+    assert any("graph load failed" in warning for warning in report.warnings)
+
+
 def test_initialize_role_accepts_chinese_role_name(tmp_role_home):
     role_path = initialize_role("张朝", skill_version="0.1.0")
     bundle = load_role_bundle("张朝")
