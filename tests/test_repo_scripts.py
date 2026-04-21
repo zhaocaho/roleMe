@@ -37,6 +37,12 @@ def test_build_skill_creates_artifact_without_scripts(tmp_path):
     assert not (artifact / "tools" / "__pycache__").exists()
 
 
+def test_build_skill_includes_graph_schema_template(tmp_path):
+    artifact = build_skill(output_root=tmp_path)
+
+    assert (artifact / "assets" / "templates" / "brain" / "graph" / "schema.yaml").exists()
+
+
 def test_build_skill_ignores_python_cache_files(tmp_path, monkeypatch):
     (tmp_path / "bundle" / "references").mkdir(parents=True)
     (tmp_path / "tools" / "__pycache__").mkdir(parents=True)

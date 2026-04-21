@@ -12,6 +12,18 @@ import tempfile
 
 from tools.context_router import build_context_snapshot, discover_context_paths
 from tools.file_ops import atomic_write_json, atomic_write_text
+from tools.graph_index import (
+    EdgeRecord,
+    NodeRecord,
+    deterministic_edge_id,
+    deterministic_node_id,
+    doctor_graph,
+    load_graph,
+    rebuild_indexes,
+    save_graph,
+    upsert_edge,
+    upsert_node,
+)
 from tools.memory import build_frozen_snapshot, write_memory
 from tools.workflow_index import (
     WorkflowIndexEntry,
@@ -144,6 +156,11 @@ class WorkflowArchiveResult:
     project_slug: str | None
     written_paths: list[str]
     requires_reload: bool
+    markdown_written: bool = True
+    index_updated: bool = True
+    graph_updated: bool = False
+    graph_skipped: bool = False
+    doctor_warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -501,6 +518,46 @@ def _write_if_missing(path: Path, content: str) -> None:
         atomic_write_text(path, content)
 
 
+def _graph_archive_enabled() -> bool:
+    return os.environ.get("ROLEME_GRAPH_ARCHIVE", "1") != "0"
+
+
+def _persist_graph(role_path: Path, nodes: list[NodeRecord], edges: list[EdgeRecord]) -> tuple[str, ...]:
+    save_graph(role_path, nodes, edges)
+    rebuild_indexes(role_path, nodes)
+    return tuple(doctor_graph(role_path).warnings)
+
+
+def _upsert_project_graph_node(
+    role_path: Path,
+    identity: ProjectIdentity,
+    repo_path: Path | None = None,
+) -> tuple[bool, tuple[str, ...]]:
+    if not _graph_archive_enabled():
+        return False, ()
+
+    graph = load_graph(role_path)
+    path = f"projects/{identity.slug}/context.md"
+    node = NodeRecord(
+        id=deterministic_node_id(
+            node_type="Project",
+            scope="project",
+            project_slug=identity.slug,
+            path=path,
+            title=identity.title,
+        ),
+        type="Project",
+        scope="project",
+        project_slug=identity.slug,
+        path=path,
+        title=identity.title,
+        aliases=(identity.title, identity.slug),
+        metadata={"repo_path": str(repo_path)} if repo_path is not None else {},
+    )
+    warnings = _persist_graph(role_path, upsert_node(graph.nodes, node), graph.edges)
+    return True, warnings
+
+
 def maybe_bootstrap_project_from_cwd(role_path: Path) -> ProjectIdentity | None:
     if not _directory_writable(role_path):
         return None
@@ -545,6 +602,7 @@ def maybe_bootstrap_project_from_cwd(role_path: Path) -> ProjectIdentity | None:
         target=f"projects/{identity.slug}/context.md",
         summary="自动从当前 Git 仓库根目录初始化。",
     )
+    _upsert_project_graph_node(role_path, identity, repo_path=repo_root)
     return identity
 
 
@@ -712,6 +770,213 @@ def append_unique_project_memory(memory_path: Path, entries: list[str]) -> None:
     atomic_write_text(memory_path, "\n".join(lines).strip() + "\n")
 
 
+def _workflow_graph_nodes(
+    *,
+    scope: str,
+    workflow_path: str,
+    workflow_title: str,
+    workflow_summary: str,
+    workflow_applies_to: str,
+    workflow_keywords: list[str],
+    project_slug: str | None = None,
+) -> tuple[NodeRecord, NodeRecord, NodeRecord, EdgeRecord, EdgeRecord]:
+    workflow = NodeRecord(
+        id=deterministic_node_id(
+            node_type="Workflow",
+            scope=scope,
+            project_slug=project_slug,
+            path=workflow_path,
+            title=workflow_title,
+        ),
+        type="Workflow",
+        scope=scope,
+        project_slug=project_slug,
+        path=workflow_path,
+        title=workflow_title,
+        summary=workflow_summary,
+        aliases=(workflow_title,),
+        keywords=tuple(workflow_keywords),
+    )
+    concept = NodeRecord(
+        id=deterministic_node_id(
+            node_type="Concept",
+            scope=scope,
+            project_slug=project_slug,
+            title=workflow_applies_to,
+        ),
+        type="Concept",
+        scope=scope,
+        project_slug=project_slug,
+        title=workflow_applies_to,
+        summary=workflow_applies_to,
+        aliases=(workflow_applies_to,),
+    )
+    evidence = NodeRecord(
+        id=deterministic_node_id(
+            node_type="Evidence",
+            scope=scope,
+            project_slug=project_slug,
+            path=workflow_path,
+            title=f"Evidence for {workflow_title}",
+            metadata={"entry_key": "workflow", "source_path": workflow_path},
+        ),
+        type="Evidence",
+        scope=scope,
+        project_slug=project_slug,
+        path=workflow_path,
+        title=f"Evidence for {workflow_title}",
+        metadata={"source_type": "user_statement", "source_path": workflow_path},
+    )
+    applies_to = EdgeRecord(
+        id=deterministic_edge_id(workflow.id, "applies_to", concept.id),
+        type="applies_to",
+        from_node=workflow.id,
+        to_node=concept.id,
+        rationale="workflow applies to archived scenario",
+    )
+    evidenced_by = EdgeRecord(
+        id=deterministic_edge_id(workflow.id, "evidenced_by", evidence.id),
+        type="evidenced_by",
+        from_node=workflow.id,
+        to_node=evidence.id,
+        rationale="workflow archived from user statement",
+    )
+    return workflow, concept, evidence, applies_to, evidenced_by
+
+
+def _upsert_workflow_graph(
+    role_path: Path,
+    plan: WorkflowArchivePlan,
+    workflow_path: str,
+    scope: str,
+) -> tuple[bool, tuple[str, ...]]:
+    if not _graph_archive_enabled():
+        return False, ()
+
+    graph = load_graph(role_path)
+    nodes = graph.nodes
+    edges = graph.edges
+    workflow, concept, evidence, applies_to, evidenced_by = _workflow_graph_nodes(
+        scope=scope,
+        project_slug=plan.project_slug if scope == "project" else None,
+        workflow_path=workflow_path,
+        workflow_title=plan.workflow_title,
+        workflow_summary=plan.workflow_summary,
+        workflow_applies_to=plan.workflow_applies_to,
+        workflow_keywords=plan.workflow_keywords,
+    )
+    for node in [workflow, concept, evidence]:
+        nodes = upsert_node(nodes, node)
+    for edge in [applies_to, evidenced_by]:
+        edges = upsert_edge(edges, edge)
+
+    if scope == "project" and plan.project_slug and plan.project_title:
+        project = NodeRecord(
+            id=deterministic_node_id(
+                node_type="Project",
+                scope="project",
+                project_slug=plan.project_slug,
+                path=f"projects/{plan.project_slug}/context.md",
+                title=plan.project_title,
+            ),
+            type="Project",
+            scope="project",
+            project_slug=plan.project_slug,
+            path=f"projects/{plan.project_slug}/context.md",
+            title=plan.project_title,
+            aliases=(plan.project_title, plan.project_slug),
+        )
+        nodes = upsert_node(nodes, project)
+        edges = upsert_edge(
+            edges,
+            EdgeRecord(
+                id=deterministic_edge_id(workflow.id, "belongs_to", project.id),
+                type="belongs_to",
+                from_node=workflow.id,
+                to_node=project.id,
+                rationale="project workflow belongs to project",
+            ),
+        )
+        for memory_entry in plan.project_memory:
+            safe_entry = sanitize_archive_entry(memory_entry)
+            memory_path = f"projects/{plan.project_slug}/memory.md"
+            memory = NodeRecord(
+                id=deterministic_node_id(
+                    node_type="Memory",
+                    scope="project",
+                    project_slug=plan.project_slug,
+                    path=memory_path,
+                    title=safe_entry,
+                    metadata={"entry_key": hashlib.sha1(safe_entry.encode("utf-8")).hexdigest()[:12]},
+                ),
+                type="Memory",
+                scope="project",
+                project_slug=plan.project_slug,
+                path=memory_path,
+                title=safe_entry,
+                metadata={"entry_key": hashlib.sha1(safe_entry.encode("utf-8")).hexdigest()[:12]},
+            )
+            evidence_node = NodeRecord(
+                id=deterministic_node_id(
+                    node_type="Evidence",
+                    scope="project",
+                    project_slug=plan.project_slug,
+                    path=memory_path,
+                    title=f"Evidence for {safe_entry}",
+                    metadata={"entry_key": hashlib.sha1(f'evidence:{safe_entry}'.encode("utf-8")).hexdigest()[:12]},
+                ),
+                type="Evidence",
+                scope="project",
+                project_slug=plan.project_slug,
+                path=memory_path,
+                title=f"Evidence for {safe_entry}",
+                metadata={"source_type": "user_statement", "source_path": memory_path},
+            )
+            nodes = upsert_node(nodes, memory)
+            nodes = upsert_node(nodes, evidence_node)
+            edges = upsert_edge(
+                edges,
+                EdgeRecord(
+                    id=deterministic_edge_id(memory.id, "belongs_to", project.id),
+                    type="belongs_to",
+                    from_node=memory.id,
+                    to_node=project.id,
+                ),
+            )
+            edges = upsert_edge(
+                edges,
+                EdgeRecord(
+                    id=deterministic_edge_id(memory.id, "evidenced_by", evidence_node.id),
+                    type="evidenced_by",
+                    from_node=memory.id,
+                    to_node=evidence_node.id,
+                ),
+            )
+
+    warnings = _persist_graph(role_path, nodes, edges)
+    return True, warnings
+
+
+def _safe_upsert_workflow_graph(
+    role_path: Path,
+    plan: WorkflowArchivePlan,
+    workflow_path: str,
+    scope: str,
+) -> tuple[bool, bool, tuple[str, ...]]:
+    if not _graph_archive_enabled():
+        return False, True, ()
+    try:
+        graph_updated, warnings = _upsert_workflow_graph(
+            role_path,
+            plan,
+            workflow_path=workflow_path,
+            scope=scope,
+        )
+        return graph_updated, False, warnings
+    except Exception as exc:
+        return False, False, (f"graph archive failed: {exc}",)
+
+
 def archive_general_workflow(plan: WorkflowArchivePlan) -> WorkflowArchiveResult:
     current = get_current_role_state()
     if plan.role_name and plan.role_name != current.role_name:
@@ -745,6 +1010,12 @@ def archive_general_workflow(plan: WorkflowArchivePlan) -> WorkflowArchiveResult
         write_memory(role_path, target="user", content=sanitize_archive_entry(rule))
     for item in plan.memory_summary:
         write_memory(role_path, target="memory", content=sanitize_archive_entry(item))
+    graph_updated, graph_skipped, doctor_warnings = _safe_upsert_workflow_graph(
+        role_path,
+        plan,
+        workflow_path=f"brain/workflows/{workflow_filename}",
+        scope="global",
+    )
     return WorkflowArchiveResult(
         role_name=current.role_name,
         project_title=None,
@@ -757,6 +1028,9 @@ def archive_general_workflow(plan: WorkflowArchivePlan) -> WorkflowArchiveResult
             "memory/MEMORY.md",
         ],
         requires_reload=bool(plan.user_rules or plan.memory_summary),
+        graph_updated=graph_updated,
+        graph_skipped=graph_skipped,
+        doctor_warnings=doctor_warnings,
     )
 
 
@@ -802,6 +1076,12 @@ def archive_project_workflow(plan: WorkflowArchivePlan) -> WorkflowArchiveResult
         target=f"projects/{plan.project_slug}/context.md",
         summary="记录项目上下文与 workflow 索引入口。",
     )
+    graph_updated, graph_skipped, doctor_warnings = _safe_upsert_workflow_graph(
+        role_path,
+        plan,
+        workflow_path=f"projects/{plan.project_slug}/workflows/{workflow_filename}",
+        scope="project",
+    )
     return WorkflowArchiveResult(
         role_name=current.role_name,
         project_title=plan.project_title,
@@ -814,6 +1094,9 @@ def archive_project_workflow(plan: WorkflowArchivePlan) -> WorkflowArchiveResult
             "projects/index.md",
         ],
         requires_reload=False,
+        graph_updated=graph_updated,
+        graph_skipped=graph_skipped,
+        doctor_warnings=doctor_warnings,
     )
 
 
@@ -1351,11 +1634,18 @@ def initialize_role(role_name: str, skill_version: str) -> Path:
     if destination.exists():
         raise FileExistsError(f"Role already exists: {destination}")
 
-    for relative_dir in ["brain/topics", "memory/episodes", "projects", "persona"]:
+    for relative_dir in [
+        "brain/graph/indexes",
+        "brain/topics",
+        "memory/episodes",
+        "projects",
+        "persona",
+    ]:
         (destination / relative_dir).mkdir(parents=True, exist_ok=True)
 
     for relative_file in [
         "AGENT.md",
+        "brain/graph/schema.yaml",
         "brain/index.md",
         "memory/MEMORY.md",
         "memory/USER.md",

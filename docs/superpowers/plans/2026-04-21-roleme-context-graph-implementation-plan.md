@@ -465,7 +465,7 @@ git commit -m "refactor: use atomic writes for role files"
 - 修改：`tests/test_role_ops.py`
 - 修改：`tests/test_repo_scripts.py`
 
-- [ ] **步骤 1：写失败测试**
+- [x] **步骤 1：写失败测试**
 
 在 `tests/test_role_ops.py` 增加：
 
@@ -490,7 +490,7 @@ def test_build_skill_includes_graph_schema_template(tmp_path):
     assert (artifact / "assets" / "templates" / "brain" / "graph" / "schema.yaml").exists()
 ```
 
-- [ ] **步骤 2：创建 schema 模板**
+- [x] **步骤 2：创建 schema 模板**
 
 创建 `templates/brain/graph/schema.yaml`：
 
@@ -542,11 +542,11 @@ confidences:
   - low
 ```
 
-- [ ] **步骤 3：确认初始化会复制模板**
+- [x] **步骤 3：确认初始化会复制模板**
 
 如果 `initialize_role()` 已经复制整个 `templates/`，只需确保新模板被带入；否则在 `tools/role_ops.py` 中显式创建 `brain/graph/indexes` 并复制 `schema.yaml`。
 
-- [ ] **步骤 4：运行测试**
+- [x] **步骤 4：运行测试**
 
 运行：`python3 -m pytest tests/test_role_ops.py::test_initialize_role_creates_graph_schema tests/test_repo_scripts.py::test_build_skill_includes_graph_schema_template -v`
 
@@ -565,7 +565,7 @@ git commit -m "feat: bootstrap context graph schema"
 - 新增：`tools/graph_index.py`
 - 新增：`tests/test_graph_index.py`
 
-- [ ] **步骤 1：写失败测试**
+- [x] **步骤 1：写失败测试**
 
 创建 `tests/test_graph_index.py`，覆盖：
 
@@ -588,7 +588,7 @@ from tools.graph_index import (
 )
 ```
 
-- [ ] **步骤 2：实现 dataclass 和 ID**
+- [x] **步骤 2：实现 dataclass 和 ID**
 
 在 `tools/graph_index.py` 中实现：
 
@@ -608,7 +608,7 @@ concept-like: type + scope + project_slug + normalized_title
 edge: from + type + to
 ```
 
-- [ ] **步骤 3：实现 JSONL 读写和索引**
+- [x] **步骤 3：实现 JSONL 读写和索引**
 
 实现：
 
@@ -620,7 +620,7 @@ edge: from + type + to
 
 Schema 校验只需要解析本计划定义的简单 `schema.yaml` 文本结构，不引入 PyYAML 或其他第三方依赖。可先实现 `load_schema_text(role_path)` 和 `validate_schema_text(text)`，校验 `graph_schema_version`、`node_types`、`edge_types`、`statuses`、`confidences` 这些必需段落是否存在。
 
-- [ ] **步骤 4：运行测试**
+- [x] **步骤 4：运行测试**
 
 运行：`python3 -m pytest tests/test_graph_index.py -v`
 
@@ -639,7 +639,7 @@ git commit -m "feat: add context graph storage core"
 - 修改：`tools/graph_index.py`
 - 修改：`tests/test_graph_index.py`
 
-- [ ] **步骤 1：补充失败测试**
+- [x] **步骤 1：补充失败测试**
 
 在 `tests/test_graph_index.py` 增加：
 
@@ -658,7 +658,7 @@ git commit -m "feat: add context graph storage core"
 - `optimize_graph()` 可从 memory 条目回填缺失的 `Preference` / `Principle` 节点
 - 对无法稳定生成 `entry_key` 的旧 memory 条目，`optimize_graph()` 只报告建议，不创建 active 节点
 
-- [ ] **步骤 2：实现报告类型**
+- [x] **步骤 2：实现报告类型**
 
 ```python
 @dataclass(frozen=True)
@@ -672,7 +672,7 @@ class GraphOptimizeResult:
     warnings: list[str]
 ```
 
-- [ ] **步骤 3：实现 `doctor_graph()`**
+- [x] **步骤 3：实现 `doctor_graph()`**
 
 检查项：
 
@@ -689,7 +689,7 @@ class GraphOptimizeResult:
 - `low` confidence 强规则
 - `supersedes` / `invalidated_by` / `promoted_to` / `generalizes` 缺少 `Evidence` 或 `Episode` 来源
 
-- [ ] **步骤 4：实现 `optimize_graph()`**
+- [x] **步骤 4：实现 `optimize_graph()`**
 
 只执行确定性修复：
 
@@ -701,7 +701,7 @@ class GraphOptimizeResult:
 - 从 memory 条目回填缺失的 `Preference` / `Principle` 节点
 - 对无法稳定生成 `entry_key` 的旧 memory 条目只生成 warning，不强行迁移为 active 节点
 
-- [ ] **步骤 5：运行测试**
+- [x] **步骤 5：运行测试**
 
 运行：`python3 -m pytest tests/test_graph_index.py -v`
 
@@ -723,7 +723,7 @@ git commit -m "feat: add context graph doctor optimize"
 - 修改：`tools/graph_index.py`
 - 修改：`tests/test_role_ops.py`
 
-- [ ] **步骤 1：写失败测试**
+- [x] **步骤 1：写失败测试**
 
 在 `tests/test_role_ops.py` 增加：
 
@@ -734,7 +734,7 @@ git commit -m "feat: add context graph doctor optimize"
 - `ROLEME_GRAPH_ARCHIVE=0` 时 Markdown 正常写入，返回 `graph_skipped=True`
 - Graph 写入失败时返回 partial state，不能伪装完整成功
 
-- [ ] **步骤 2：扩展 `WorkflowArchiveResult`**
+- [x] **步骤 2：扩展 `WorkflowArchiveResult`**
 
 在 `tools/role_ops.py` 中增加字段：
 
@@ -746,7 +746,7 @@ graph_skipped: bool = False
 doctor_warnings: tuple[str, ...] = ()
 ```
 
-- [ ] **步骤 3：增加 upsert helper**
+- [x] **步骤 3：增加 upsert helper**
 
 在 `tools/graph_index.py` 中增加：
 
@@ -763,7 +763,7 @@ def upsert_edge(edges: list[EdgeRecord], edge: EdgeRecord) -> list[EdgeRecord]:
     return [*edges, edge]
 ```
 
-- [ ] **步骤 4：接入归档写 Graph**
+- [x] **步骤 4：接入归档写 Graph**
 
 在 `archive_general_workflow()` 中写入：
 
@@ -787,7 +787,7 @@ def upsert_edge(edges: list[EdgeRecord], edge: EdgeRecord) -> list[EdgeRecord]:
 - `metadata.repo_path` 记录当前仓库绝对路径
 - 只在当前 cwd 是 Git 仓库根目录且项目 bootstrap 实际发生时写入
 
-- [ ] **步骤 5：运行测试**
+- [x] **步骤 5：运行测试**
 
 运行：`python3 -m pytest tests/test_role_ops.py -k "archive" -v`
 
