@@ -379,7 +379,7 @@ def atomic_rewrite_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
 
 预期：通过。
 
-- [ ] **步骤 5：提交**
+- [x] **步骤 5：提交**
 
 ```bash
 git add tools/file_ops.py tests/test_file_ops.py
@@ -448,7 +448,7 @@ python3 -m pytest tests/test_repo_scripts.py::test_critical_role_tools_do_not_wr
 
 预期：全部通过。
 
-- [ ] **步骤 5：提交**
+- [x] **步骤 5：提交**
 
 ```bash
 git add tools/file_ops.py tools/workflow_index.py tools/memory.py tools/role_ops.py tests/test_file_ops.py tests/test_repo_scripts.py
@@ -552,7 +552,7 @@ confidences:
 
 预期：通过。
 
-- [ ] **步骤 5：提交**
+- [x] **步骤 5：提交**
 
 ```bash
 git add templates/brain/graph/schema.yaml tools/role_ops.py tests/test_role_ops.py tests/test_repo_scripts.py
@@ -1145,7 +1145,7 @@ git commit -m "test: verify context graph integration"
 - 发布后修改：`skills/roleme/SKILL.md`
 - 修改：`tests/test_repo_scripts.py`
 
-- [ ] **步骤 1：写失败测试**
+- [x] **步骤 1：写失败测试**
 
 在 `tests/test_repo_scripts.py` 增加：
 
@@ -1162,7 +1162,7 @@ def test_build_skill_documents_context_graph_as_background_mechanism(tmp_path):
     assert "用户不需要直接维护 Graph" in skill_md
 ```
 
-- [ ] **步骤 2：更新 `bundle/references/usage.md`**
+- [x] **步骤 2：更新 `bundle/references/usage.md`**
 
 新增章节：
 
@@ -1183,7 +1183,7 @@ ROLEME_GRAPH_ARCHIVE=0   禁用 Graph 写入，markdown 正文和索引仍正常
 ```
 ````
 
-- [ ] **步骤 3：更新 `bundle/SKILL.template.md`**
+- [x] **步骤 3：更新 `bundle/SKILL.template.md`**
 
 新增运行时规则：
 
@@ -1191,7 +1191,7 @@ ROLEME_GRAPH_ARCHIVE=0   禁用 Graph 写入，markdown 正文和索引仍正常
 - 用户不需要直接维护 Graph；Context Graph 是后台机制，不改变用户正常对话方式。
 ```
 
-- [ ] **步骤 4：发布并测试**
+- [x] **步骤 4：发布并测试**
 
 运行：
 

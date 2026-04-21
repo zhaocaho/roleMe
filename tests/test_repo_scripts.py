@@ -203,6 +203,18 @@ def test_build_skill_includes_natural_language_archive_guidance(tmp_path):
     assert "用户只需要自然表达内容，系统会先总结，再选择目标位置。" in usage_md
 
 
+def test_build_skill_documents_context_graph_as_background_mechanism(tmp_path):
+    artifact = build_skill(output_root=tmp_path)
+    skill_md = (artifact / "SKILL.md").read_text(encoding="utf-8")
+    usage_md = (artifact / "references" / "usage.md").read_text(encoding="utf-8")
+
+    assert "Context Graph 是后台机制" in usage_md
+    assert "不改变用户正常对话方式" in usage_md
+    assert "ROLEME_GRAPH_ROUTING=0" in usage_md
+    assert "ROLEME_GRAPH_ARCHIVE=0" in usage_md
+    assert "用户不需要直接维护 Graph" in skill_md
+
+
 def test_publish_skill_writes_repo_publish_directory(tmp_path, monkeypatch):
     (tmp_path / "bundle" / "references").mkdir(parents=True)
     (tmp_path / "tools").mkdir()

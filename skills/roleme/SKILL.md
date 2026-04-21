@@ -29,6 +29,7 @@ description: Use when the user wants to initialize, switch, inspect, optimize, e
 - 常驻层应保持最小且稳定；细节、专题知识与项目上下文优先按需展开，而不是堆进单个总说明。
 - 记忆写回优先遵循 `AGENT.md` 中的策略和 `memory/` 结构。
 - 主题知识与项目上下文通过 `tools/context_router.py` 做渐进式发现，不应一次性全量加载。
+- 用户不需要直接维护 Graph；Context Graph 是后台机制，不改变用户正常对话方式。
 - 归档内容优先追求对智能体可读：结构清晰、边界明确、可检索、可增量更新，而不是只写成长段自由叙述。
 - 初始化访谈可以是动态的：问题由模型根据当前已知信息和信息缺口来决定，但最终仍要落到稳定的 `persona/`、`memory/`、`brain/`、`projects/` 结构。
 - 槽位只是归档目标，不是固定提问顺序；模型应按当前情景决定下一问，而不是机械执行问卷。
