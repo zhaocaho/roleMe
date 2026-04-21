@@ -79,14 +79,12 @@ brain/graph/
     └── aliases.json
 ```
 
-上层形成五类 Graph View：
+上层不拆成五套图谱系统，而是围绕同一套 Graph Core 提供三类能力视角：
 
 ```text
-Workflow Graph          调度任务应该怎么做
-Memory / Principle Graph 管理长期偏好、规则和方法论
-Project Graph           聚合项目上下文、项目 workflow 和项目经验
-Evidence / Trust Graph  判断知识是否可信、是否过期、是否冲突
-Concept / Topic Graph   建立 query 说法与知识名称之间的语义桥
+Archive View    写入和沉淀：workflow、记忆、项目经验、决策、文档
+Recall View     读取和命中：query -> concept/workflow/project -> file
+Trust View      校验和治理：来源、置信度、状态、冲突、替代关系
 ```
 
 Graph Core 只保存结构化索引和轻量摘要；正文文件仍在：
@@ -101,7 +99,26 @@ memory/MEMORY.md
 memory/episodes/*.md
 ```
 
-## Graph View 设计
+## 是否需要五层图谱
+
+不需要把 `Workflow`、`Memory`、`Project`、`Evidence`、`Concept` 做成五套独立图谱。
+
+五类图谱适合作为设计分析维度，用来确保系统覆盖调度、记忆、项目、证据和语义命中；但如果按五层分别实现，会导致 schema、写入、查询、doctor 和迁移都过度复杂。
+
+本设计最终选择：
+
+```text
+一套 Graph Core
+三类能力视角
+少量一等节点
+按阶段扩展节点和关系
+```
+
+第一阶段只把 `Project`、`Workflow`、`Rule`、`Evidence`、`Concept`、`File` 做成一等节点。`Memory / Principle / Topic / Source / Decision` 等能力先作为远景保留，不进入第一阶段实现。
+
+## 长期领域模型
+
+本节描述长期领域模型，用来保证未来扩展方向一致；其中只有 `Project`、`Workflow`、`Rule`、`Evidence`、`Concept`、`File` 进入 v1 实现。
 
 ### Workflow Graph
 
@@ -145,7 +162,6 @@ Rule:
 Workflow belongs_to Project
 Workflow applies_to Concept
 Workflow depends_on Rule
-Workflow implemented_by Skill
 Workflow specializes Workflow
 Workflow supersedes Workflow
 Workflow evidenced_by Evidence
@@ -383,14 +399,96 @@ Rule applies_to Concept
 -> 再连接到 workflow、rule、file
 ```
 
+## 实现边界
+
+本设计的长期目标覆盖记录、召回、可信度和演化治理，但第一阶段必须收窄到可验证的最小闭环。
+
+第一阶段只实现：
+
+```text
+Project
+Workflow
+Rule
+Evidence
+Concept
+File
+```
+
+第一阶段只实现这些关系：
+
+```text
+belongs_to
+applies_to
+depends_on
+specializes
+supersedes
+evidenced_by
+mentions
+related_to
+```
+
+第一阶段不实现：
+
+```text
+Memory / Principle Graph 的完整写入
+Topic Graph 的通用语义网络
+Source 节点和外部来源权威评分
+复杂冲突解释
+项目局部独立 graph.jsonl
+全量历史 markdown 自动抽取
+向量召回
+```
+
+这样设计后，用户能先获得最直接的收益：
+
+```text
+更准地命中通用 workflow 和项目 workflow
+避免废弃或被替代的 workflow 误入上下文
+让 workflow 的来源和依赖规则有结构化记录
+graph 损坏时仍能回退现有路由
+```
+
+## 用户复杂度边界
+
+Graph 是内部机制，不应增加用户日常使用负担。
+
+用户仍然通过现有入口使用 `roleMe`：
+
+```text
+/roleMe <角色名>
+自然语言归档
+workflow 归档
+doctor
+optimize
+```
+
+用户不需要理解或手动维护：
+
+```text
+nodes.jsonl
+edges.jsonl
+Evidence
+Concept alias
+trust_filter
+graph_expand
+```
+
+当 graph 影响行为时，系统只在必要时用自然语言说明结果，例如：
+
+```text
+已命中当前项目 workflow。
+旧 workflow 已被新 workflow 替代，已改用新版本。
+这条规则缺少证据，只作为辅助参考。
+```
+
 ## 统一 Schema
 
-第一阶段所有节点都遵循统一基础结构，类型专属字段放入 `metadata`。
+第一阶段节点遵循统一基础结构，类型专属字段放入 `metadata`。远景类型只在设计说明中保留，不进入 v1 schema 校验。
 
 ```yaml
 node:
   id: string
-  type: Project | Repository | Workflow | Skill | Rule | Preference | Principle | Decision | Memory | Episode | Evidence | Source | Concept | Topic | Alias | Document | File
+  type: Project | Workflow | Rule | Evidence | Concept | File
   title: string
   summary: string
   path: string?
@@ -410,7 +508,7 @@ edge:
   id: string
   from: string
   to: string
-  type: belongs_to | contains | owns | applies_to | depends_on | specializes | generalizes | implemented_by | derived_from | promoted_to | evidenced_by | verified_by | invalidated_by | supports | contradicts | supersedes | mentions | records | related_to | alias_of | maps_to | covers | has_memory | uses | scoped_to
+  type: belongs_to | applies_to | depends_on | specializes | supersedes | evidenced_by | mentions | related_to
   weight: number
   rationale: string
   created_at: string
@@ -419,9 +517,13 @@ edge:
 
 约束：
 
-- `id` 必须稳定，优先由 `type + scope + path/title` 派生
+- `id` 必须稳定
+- 有 `path` 的节点，`id` 由 `type + scope + project_slug + normalized_path` 派生
+- 无 `path` 的概念节点，`id` 由 `type + normalized_title` 派生
 - 有正文的节点必须提供 `path`
-- `Workflow`、`Rule`、`Preference`、`Principle` 被提升为强上下文前，应至少有一个 `evidenced_by` 关系，或者明确标记 `confidence: medium/low`
+- `Workflow`、`Rule` 被提升为强上下文前，优先使用带 `evidenced_by` 的节点
+- v1 中缺少 evidence 不阻断加载，但会降低 trust score
+- v2 起，新归档的 workflow 必须创建 Evidence
 - `deprecated`、`superseded`、`invalidated` 节点默认不进入强上下文
 - `supersedes` 关系优先级高于普通相似度命中
 - `project` scope 节点必须带 `project_slug`
@@ -429,6 +531,45 @@ edge:
 ## 写入协议
 
 图谱写入必须是 markdown 写入的结构化伴随动作，而不是替代动作。
+
+### 一致性规则
+
+markdown 和 graph 的权威边界如下：
+
+```text
+markdown 是正文权威：流程步骤、规则正文、项目说明、记忆正文以 markdown 为准
+graph 是路由和可靠性权威：status、confidence、supersedes、evidenced_by 以 graph 为准
+```
+
+当两者冲突时：
+
+```text
+router 以 graph 状态为准
+doctor 必须报告冲突
+optimize 可以生成修复建议
+不得静默忽略冲突
+```
+
+写入顺序固定为：
+
+```text
+1. 写正文 markdown 文件
+2. 更新 markdown index
+3. upsert graph node / edge
+4. 运行轻量一致性校验
+5. 返回写入结果
+```
+
+任一步失败时，不应伪装为成功。返回结果必须能表达 partial state，例如：
+
+```text
+markdown_written: true
+index_updated: true
+graph_updated: false
+doctor_warnings: [...]
+```
+
+第一阶段不要求真正事务回滚，但必须保证重复执行同一次归档操作是幂等的。
 
 ### 归档通用 workflow
 
@@ -450,7 +591,7 @@ upsert Workflow node(scope=project, project_slug=<project>)
 upsert belongs_to / specializes / depends_on / evidenced_by edges
 ```
 
-### 归档长期偏好
+### 后续扩展：归档长期偏好
 
 ```text
 写 memory/USER.md
@@ -459,7 +600,7 @@ upsert evidenced_by edge
 必要时连接 applies_to Workflow 或 applies_to Concept
 ```
 
-### 归档长期结论或方法论
+### 后续扩展：归档长期结论或方法论
 
 ```text
 写 memory/MEMORY.md 或 brain/topics/<topic>.md
@@ -467,7 +608,7 @@ upsert Principle / Concept / Topic node
 upsert derived_from / evidenced_by / supports edges
 ```
 
-### 归档项目经验
+### 后续扩展：归档项目经验
 
 ```text
 写 projects/<project>/memory.md 或 memory/episodes/<episode>.md
@@ -486,14 +627,14 @@ build_frozen_snapshot()
 -> 加载 resident 层和轻量 graph summary
 
 graph_recall(query)
--> 从 Concept / Workflow / Project / Rule / Memory 找候选节点
+-> 从 Concept / Workflow / Project / Rule / File 找候选节点
 
 graph_expand(nodes)
 -> 沿 applies_to / depends_on / specializes / evidenced_by 扩展 1-2 跳
 
 trust_filter(nodes)
 -> 排除 deprecated / superseded / invalidated
--> 标记 low confidence / stale / contradicts
+-> 标记 low confidence / stale
 
 paths_from_nodes(nodes)
 -> 转成 markdown path
@@ -509,11 +650,47 @@ assemble_snapshot(paths)
 2. 当前项目 Workflow 节点
 3. 当前项目 workflow 依赖的 Rule / Evidence
 4. 通用 Workflow 节点
-5. 通用 Principle / Preference / Concept
+5. 通用 Concept / Rule
 6. 普通 brain/project/memory fallback
 ```
 
 未命中图谱时，系统必须回退现有 `discover_context_paths()` 逻辑。
+
+### v1 排序规则
+
+图谱召回应使用确定性评分，避免实现随意导致命中不稳定。
+
+第一阶段建议评分：
+
+```text
+score =
+  text_match * 3
+  + alias_match * 4
+  + current_project_bonus * 5
+  + workflow_scope_bonus
+  + evidence_confidence_bonus
+  - stale_penalty
+  - low_confidence_penalty
+```
+
+硬过滤：
+
+```text
+invalidated: block
+superseded: block unless user asks history
+deprecated: block unless user asks history
+missing_path for path-backed node: block and doctor warning
+```
+
+推荐加分：
+
+```text
+current_project_bonus: 当前 cwd 对应项目命中
+workflow_scope_bonus: project workflow 高于 global workflow
+evidence_confidence_bonus: high > medium > low
+```
+
+当第一名和第二名分差过小时，系统应回退旧路由或请求澄清，而不是强行加载错误 workflow。
 
 ## 错误知识处理
 
@@ -540,7 +717,7 @@ source_type: user_statement | document | code | test | commit | model_summary | 
 - `deprecated` 节点默认不加载，除非用户明确询问历史
 - `stale` 节点可加载，但应降低排序
 - `low` confidence 节点只能作为辅助，不可覆盖用户明确要求
-- 存在 `contradicts` 关系时，应优先加载双方摘要和证据，而不是静默选择其一
+- 后续引入 `contradicts` 关系后，应优先加载双方摘要和证据，而不是静默选择其一
 - 存在 `supersedes` 关系时，应优先选择较新的 active 节点
 
 ## 与现有模块的集成
@@ -568,14 +745,15 @@ source_type: user_statement | document | code | test | commit | model_summary | 
 增强模块，负责：
 
 - workflow 归档时写入 graph
-- 项目自动 bootstrap 时补齐 Project / Repository 节点
+- 项目自动 bootstrap 时补齐 Project 节点，并可在 metadata 中记录仓库路径
 - doctor 检查 graph schema、孤儿边、失效 path、重复节点
 
 ### `tools/memory.py`
 
 增强模块，负责：
 
-- 写 `USER.md`、`MEMORY.md`、episode 时可选写入 Memory / Preference / Principle / Evidence 节点
+- v1 不改变 `USER.md`、`MEMORY.md`、episode 的写入行为
+- 后续扩展时，可在写记忆时补充 Memory / Preference / Principle / Evidence 节点
 - build frozen snapshot 时只加入轻量 graph summary，不加入完整 graph
 
 ### `tools/workflow_index.py`
@@ -588,7 +766,7 @@ source_type: user_statement | document | code | test | commit | model_summary | 
 
 ## 第一阶段实现范围
 
-虽然完整设计包含五类图谱，但第一阶段只实现最小闭环：
+虽然完整设计覆盖多类知识对象，但第一阶段只实现 Workflow Graph 最小闭环：
 
 节点类型：
 
@@ -626,6 +804,7 @@ related_to
 
 第一阶段暂不覆盖：
 
+- `Preference`、`Principle`、`Decision`、`Memory`、`Episode`、`Source`、`Topic`、`Alias` 的 schema 校验和写入
 - 全量历史 markdown 自动抽取
 - 项目局部独立 `graph.jsonl`
 - 复杂冲突解释
@@ -697,10 +876,10 @@ related_to
 
 第一阶段完成 Workflow Graph 最小闭环后，再逐步扩展：
 
-1. Memory / Principle Graph：把稳定偏好、方法论、项目经验结构化
-2. Evidence / Trust Graph：加强冲突、过期、来源和验证状态处理
-3. Concept / Topic Graph：扩大 alias、topic、concept 的召回覆盖
-4. Project Graph：支持项目局部图谱和跨项目经验提升
+1. Memory / Principle 能力：把稳定偏好、方法论、项目经验结构化
+2. Evidence / Trust 能力：加强冲突、过期、来源和验证状态处理
+3. Concept / Topic 能力：扩大 alias、topic、concept 的召回覆盖
+4. Project 能力：支持项目局部图谱和跨项目经验提升
 5. optimize / doctor：处理重复、孤儿边、过时摘要和 resident/on-demand 边界漂移
 
 最终目标不是让图谱变成新的大杂烩，而是让 `roleMe` 的上下文系统做到：
