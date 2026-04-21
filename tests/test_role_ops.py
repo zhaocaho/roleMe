@@ -4,12 +4,14 @@ import re
 
 import tools.role_ops as role_ops
 from tools.context_router import discover_context_paths
+from tools.graph_index import EdgeRecord, load_graph, save_graph
 from tools.role_ops import (
     ProjectIdentity,
     RoleInterview,
     RoleInterviewProject,
     RoleInterviewTopic,
     WorkflowArchivePlan,
+    archive_decision,
     archive_general_workflow,
     archive_project_workflow,
     assess_interview_gaps,
@@ -44,6 +46,17 @@ def test_initialize_role_creates_required_files(tmp_role_home):
     assert (role_path / "memory" / "episodes").is_dir()
     assert (role_path / "persona" / "narrative.md").exists()
     assert not (role_path / "self-model").exists()
+
+
+def test_initialize_role_creates_graph_schema(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+
+    schema_path = role_path / "brain" / "graph" / "schema.yaml"
+    assert schema_path.exists()
+    schema_text = schema_path.read_text(encoding="utf-8")
+    assert 'graph_schema_version: "1.0"' in schema_text
+    assert "node_types:" in schema_text
+    assert "edge_types:" in schema_text
 
 
 def test_load_role_bundle_returns_persona_resident_and_on_demand_paths(tmp_role_home):
@@ -140,6 +153,15 @@ def test_load_role_bundle_bootstraps_project_from_git_repo_root(
     assert "projects/roleme/context.md" in (
         role_path / "projects" / "index.md"
     ).read_text(encoding="utf-8")
+    graph = load_graph(role_path)
+    project_nodes = [node for node in graph.nodes if node.type == "Project"]
+    assert any(
+        node.scope == "project"
+        and node.project_slug == "roleme"
+        and node.path == "projects/roleme/context.md"
+        and node.metadata.get("repo_path") == str(repo_root)
+        for node in project_nodes
+    )
 
 
 def test_load_role_bundle_does_not_bootstrap_project_from_git_subdirectory(
@@ -304,6 +326,40 @@ def test_doctor_role_reports_missing_file(tmp_role_home):
 
     report = doctor_role("self")
     assert "AGENT.md" in report.missing_files
+
+
+def test_doctor_role_includes_graph_warnings(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    save_graph(
+        role_path,
+        nodes=[],
+        edges=[
+            EdgeRecord(
+                id="edge-orphan",
+                type="related_to",
+                from_node="missing-source",
+                to_node="missing-target",
+            )
+        ],
+    )
+
+    report = doctor_role("self")
+
+    assert "orphan edge source: edge-orphan -> missing-source" in report.warnings
+    assert "orphan edge target: edge-orphan -> missing-target" in report.warnings
+
+
+def test_doctor_role_reports_corrupt_graph_jsonl_as_warning(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    (role_path / "brain" / "graph" / "nodes.jsonl").write_text(
+        "{bad json\n",
+        encoding="utf-8",
+    )
+
+    report = doctor_role("self")
+
+    assert report.missing_files == []
+    assert any("graph load failed" in warning for warning in report.warnings)
 
 
 def test_initialize_role_accepts_chinese_role_name(tmp_role_home):
@@ -733,6 +789,12 @@ def test_finalize_role_interview_writes_role_bundle_from_session(tmp_role_home):
     assert "Current priority is interview orchestration" in (
         role_path / "projects" / "roleme" / "memory.md"
     ).read_text(encoding="utf-8")
+    graph = load_graph(role_path)
+    topic = next(node for node in graph.nodes if node.type == "Topic")
+    concept = next(node for node in graph.nodes if node.type == "Concept")
+    assert topic.path == "brain/topics/ai-product.md"
+    assert concept.title == "AI Product"
+    assert any(edge.type == "covers" and edge.from_node == topic.id and edge.to_node == concept.id for edge in graph.edges)
 
 
 def test_finalize_role_interview_merges_language_preference_into_user_memory(tmp_role_home):
@@ -883,6 +945,16 @@ def test_archive_general_workflow_writes_topic_index_and_memory_promotions(
     assert "- 先澄清场景，再开始执行" in (
         Path(role_path) / "memory" / "USER.md"
     ).read_text(encoding="utf-8")
+    graph = load_graph(Path(role_path))
+    workflow = next(node for node in graph.nodes if node.type == "Workflow")
+    assert workflow.path == "brain/workflows/general-collaboration.md"
+    assert any(node.type == "Concept" and node.title == "当用户需要先对齐工作方式、再进入执行时使用" for node in graph.nodes)
+    assert any(node.type == "Evidence" and node.metadata.get("source_path") == workflow.path for node in graph.nodes)
+    assert any(edge.type == "applies_to" and edge.from_node == workflow.id for edge in graph.edges)
+    assert any(edge.type == "evidenced_by" and edge.from_node == workflow.id for edge in graph.edges)
+    assert result.graph_updated is True
+    assert result.graph_skipped is False
+    assert result.doctor_warnings == ()
 
 
 def test_archive_project_workflow_writes_project_assets_and_is_rediscoverable(
@@ -926,3 +998,154 @@ def test_archive_project_workflow_writes_project_assets_and_is_rediscoverable(
     assert "- 工作流索引: workflows/index.md" in (
         role_path / "projects" / "roleme" / "context.md"
     ).read_text(encoding="utf-8")
+    graph = load_graph(role_path)
+    project = next(node for node in graph.nodes if node.type == "Project")
+    workflow = next(node for node in graph.nodes if node.type == "Workflow")
+    memory = next(node for node in graph.nodes if node.type == "Memory")
+    assert project.path == "projects/roleme/context.md"
+    assert workflow.path == "projects/roleme/workflows/requirements.md"
+    assert memory.scope == "project"
+    assert memory.project_slug == "roleme"
+    assert any(edge.type == "belongs_to" and edge.from_node == workflow.id and edge.to_node == project.id for edge in graph.edges)
+    assert any(edge.type == "belongs_to" and edge.from_node == memory.id and edge.to_node == project.id for edge in graph.edges)
+    assert any(edge.type == "evidenced_by" and edge.from_node == memory.id for edge in graph.edges)
+    assert result.graph_updated is True
+    assert result.graph_skipped is False
+
+
+def test_archive_general_workflow_skips_graph_when_disabled(tmp_role_home, monkeypatch):
+    monkeypatch.setenv("ROLEME_GRAPH_ARCHIVE", "0")
+    initialize_role("self", skill_version="0.1.0")
+    load_role_bundle("self")
+    plan = parse_workflow_archive_response(
+        {
+            "kind": "general",
+            "role_name": "self",
+            "workflow_slug": "general-collaboration",
+            "workflow_title": "通用协作工作流",
+            "workflow_summary": "适合需要先设计再执行的任务",
+            "workflow_applies_to": "当用户需要先对齐工作方式、再进入执行时使用",
+            "workflow_keywords": ["协作", "设计", "执行"],
+            "workflow_doc_markdown": "# 通用协作工作流\n\n先澄清场景，再开始执行。\n",
+            "context_summary_markdown": "",
+            "user_rules": [],
+            "memory_summary": [],
+            "project_memory": [],
+        }
+    )
+
+    result = archive_general_workflow(plan)
+    role_path = Path(get_current_role_state().role_path)
+
+    assert (role_path / "brain" / "workflows" / "general-collaboration.md").exists()
+    assert load_graph(role_path).nodes == []
+    assert result.graph_updated is False
+    assert result.graph_skipped is True
+
+
+def test_archive_general_workflow_returns_partial_state_when_graph_write_fails(
+    tmp_role_home,
+    monkeypatch,
+):
+    initialize_role("self", skill_version="0.1.0")
+    load_role_bundle("self")
+    monkeypatch.setattr(
+        role_ops,
+        "_persist_graph",
+        lambda role_path, nodes, edges: (_ for _ in ()).throw(RuntimeError("graph boom")),
+    )
+    plan = parse_workflow_archive_response(
+        {
+            "kind": "general",
+            "role_name": "self",
+            "workflow_slug": "general-collaboration",
+            "workflow_title": "通用协作工作流",
+            "workflow_summary": "适合需要先设计再执行的任务",
+            "workflow_applies_to": "当用户需要先对齐工作方式、再进入执行时使用",
+            "workflow_keywords": ["协作", "设计", "执行"],
+            "workflow_doc_markdown": "# 通用协作工作流\n\n先澄清场景，再开始执行。\n",
+            "context_summary_markdown": "",
+            "user_rules": [],
+            "memory_summary": [],
+            "project_memory": [],
+        }
+    )
+
+    result = archive_general_workflow(plan)
+    role_path = Path(get_current_role_state().role_path)
+
+    assert (role_path / "brain" / "workflows" / "general-collaboration.md").exists()
+    assert result.markdown_written is True
+    assert result.index_updated is True
+    assert result.graph_updated is False
+    assert result.graph_skipped is False
+    assert result.doctor_warnings == ("graph archive failed: graph boom",)
+
+
+def test_archive_decision_writes_decision_and_evidence(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+
+    result = archive_decision(
+        role_path,
+        title="Use graph as background index",
+        summary="Graph routes context while Markdown remains source of truth.",
+        rationale="Keeps user workflow stable and preserves fallback behavior.",
+    )
+
+    graph = load_graph(role_path)
+    decision = next(node for node in graph.nodes if node.type == "Decision")
+    assert result.markdown_written is True
+    assert result.graph_updated is True
+    assert decision.title == "Use graph as background index"
+    assert any(node.type == "Evidence" and node.metadata.get("source_path") in result.written_paths for node in graph.nodes)
+    assert any(edge.type == "evidenced_by" and edge.from_node == decision.id for edge in graph.edges)
+
+
+def test_archive_decision_returns_partial_state_when_graph_write_fails(
+    tmp_role_home,
+    monkeypatch,
+):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    monkeypatch.setattr(
+        role_ops,
+        "_persist_graph",
+        lambda role_path, nodes, edges: (_ for _ in ()).throw(RuntimeError("graph boom")),
+    )
+
+    result = archive_decision(
+        role_path,
+        title="Use graph as background index",
+        summary="Graph routes context while Markdown remains source of truth.",
+        rationale="Keeps user workflow stable and preserves fallback behavior.",
+    )
+
+    assert (role_path / result.written_paths[0]).exists()
+    assert result.markdown_written is True
+    assert result.graph_updated is False
+    assert result.graph_skipped is False
+    assert result.doctor_warnings == ("graph archive failed: graph boom",)
+
+
+def test_archive_decision_can_supersede_existing_decision(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    first = archive_decision(
+        role_path,
+        title="Old decision",
+        summary="Use only Markdown.",
+        rationale="Initial simple design.",
+    )
+    old_id = first.decision_id
+
+    second = archive_decision(
+        role_path,
+        title="New decision",
+        summary="Use Markdown plus Graph metadata.",
+        rationale="Need better routing while preserving Markdown.",
+        supersedes_id=old_id,
+    )
+
+    graph = load_graph(role_path)
+    old_decision = next(node for node in graph.nodes if node.id == old_id)
+    new_decision = next(node for node in graph.nodes if node.id == second.decision_id)
+    assert old_decision.status == "superseded"
+    assert any(edge.type == "supersedes" and edge.from_node == new_decision.id and edge.to_node == old_id for edge in graph.edges)

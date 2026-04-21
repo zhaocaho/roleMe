@@ -96,6 +96,21 @@
 
 如果摘要记忆不够，才回退到 `memory/episodes/*` 查看更细节的历史记录。
 
+## Context Graph 后台机制
+
+Context Graph 是后台机制，用作 roleMe 的索引和可信度治理层，不改变用户正常对话方式。
+
+用户仍然自然提出任务、归档经验、修改偏好；系统在后台维护 Graph，用于更稳定地命中 workflow、记录来源证据、处理过期或冲突知识。
+
+用户不需要直接维护 Graph 文件。只有当后台发现高风险冲突、低置信知识会影响重要行为，或用户显式询问诊断和来源时，系统才会说明相关状态。
+
+可用开关：
+
+```text
+ROLEME_GRAPH_ROUTING=0   禁用 Graph 召回，保留旧 markdown 路由
+ROLEME_GRAPH_ARCHIVE=0   禁用 Graph 写入，markdown 正文和索引仍正常写入
+```
+
 ### 冻结快照
 
 角色激活时，会基于常驻层生成当前会话使用的冻结快照。

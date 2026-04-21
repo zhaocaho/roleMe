@@ -5,6 +5,7 @@ from tools.context_router import (
     discover_project_paths,
     route_context_lookup,
 )
+from tools.graph_index import NodeRecord, save_graph
 from tools.role_ops import initialize_role
 
 
@@ -419,6 +420,203 @@ def test_discover_context_paths_matches_project_workflow_for_end_to_end_delivery
         "projects/coresys-devops/workflows/index.md",
         "projects/coresys-devops/workflows/end-to-end-delivery.md",
     ]
+
+
+def test_discover_context_paths_uses_graph_workflow_strong_match(
+    tmp_role_home,
+    tmp_path,
+    monkeypatch,
+):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    repo_root = tmp_path / "roleMe"
+    repo_root.mkdir()
+    (repo_root / ".git").mkdir()
+    monkeypatch.chdir(repo_root)
+
+    project_dir = role_path / "projects" / "roleme"
+    workflow_dir = project_dir / "workflows"
+    workflow_dir.mkdir(parents=True, exist_ok=True)
+    (role_path / "projects" / "index.md").write_text(
+        "# 项目索引\n\n- roleMe: projects/roleme/context.md\n",
+        encoding="utf-8",
+    )
+    (project_dir / "context.md").write_text("# roleMe\n\n项目摘要。\n", encoding="utf-8")
+    (workflow_dir / "graph-recall.md").write_text("# Graph Recall\n\n正文。\n", encoding="utf-8")
+    save_graph(
+        role_path,
+        nodes=[
+            NodeRecord(
+                id="workflow-graph-recall",
+                type="Workflow",
+                scope="project",
+                project_slug="roleme",
+                path="projects/roleme/workflows/graph-recall.md",
+                title="Graph Recall workflow",
+                summary="用于图谱召回和上下文路由",
+                aliases=("图谱召回",),
+                keywords=("graph", "recall", "路由"),
+            )
+        ],
+        edges=[],
+    )
+
+    result = discover_context_paths(role_path, query="用图谱召回来做上下文路由")
+
+    assert result == [
+        "projects/index.md",
+        "projects/roleme/context.md",
+        "projects/roleme/workflows/graph-recall.md",
+    ]
+
+
+def test_discover_context_paths_respects_graph_routing_disable(
+    tmp_role_home,
+    monkeypatch,
+):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    workflow_dir = role_path / "brain" / "workflows"
+    workflow_dir.mkdir(parents=True, exist_ok=True)
+    (workflow_dir / "graph-recall.md").write_text("# Graph Recall\n\n正文。\n", encoding="utf-8")
+    save_graph(
+        role_path,
+        nodes=[
+            NodeRecord(
+                id="workflow-graph-recall",
+                type="Workflow",
+                scope="global",
+                path="brain/workflows/graph-recall.md",
+                title="Graph Recall workflow",
+                keywords=("graph", "recall", "路由"),
+            )
+        ],
+        edges=[],
+    )
+    monkeypatch.setenv("ROLEME_GRAPH_ROUTING", "0")
+
+    result = discover_context_paths(role_path, query="graph recall 路由")
+
+    assert result == ["memory/MEMORY.md", "memory/episodes/*", "brain/index.md", "projects/index.md"]
+
+
+def test_discover_context_paths_treats_disabled_graph_archive_as_stale(
+    tmp_role_home,
+    monkeypatch,
+):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    (role_path / "brain" / "topics").mkdir(parents=True, exist_ok=True)
+    (role_path / "brain" / "index.md").write_text(
+        "# 知识索引\n\n- 定价策略: topics/pricing.md\n",
+        encoding="utf-8",
+    )
+    (role_path / "brain" / "topics" / "pricing.md").write_text(
+        "# 定价策略\n\n讨论套餐、价格锚点和商业模式。\n",
+        encoding="utf-8",
+    )
+    save_graph(
+        role_path,
+        nodes=[
+            NodeRecord(
+                id="topic-wrong",
+                type="Topic",
+                scope="global",
+                path="brain/topics/wrong.md",
+                title="无关主题",
+                keywords=("定价",),
+            )
+        ],
+        edges=[],
+    )
+    monkeypatch.setenv("ROLEME_GRAPH_ARCHIVE", "0")
+
+    result = discover_context_paths(role_path, query="定价策略怎么设计")
+
+    assert result == ["brain/index.md", "brain/topics/pricing.md"]
+
+
+def test_discover_context_paths_filters_inactive_graph_nodes(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    workflow_dir = role_path / "brain" / "workflows"
+    workflow_dir.mkdir(parents=True, exist_ok=True)
+    (workflow_dir / "old.md").write_text("# Old\n\n正文。\n", encoding="utf-8")
+    save_graph(
+        role_path,
+        nodes=[
+            NodeRecord(
+                id="workflow-old",
+                type="Workflow",
+                scope="global",
+                path="brain/workflows/old.md",
+                title="旧 workflow",
+                keywords=("旧流程",),
+                status="superseded",
+            )
+        ],
+        edges=[],
+    )
+
+    result = discover_context_paths(role_path, query="旧流程")
+
+    assert "brain/workflows/old.md" not in result
+
+
+def test_discover_context_paths_does_not_add_weak_graph_candidates_by_default(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    memory_path = role_path / "memory" / "episodes" / "graph.md"
+    memory_path.parent.mkdir(parents=True, exist_ok=True)
+    memory_path.write_text("# Graph episode\n\n一次图谱召回讨论。\n", encoding="utf-8")
+    save_graph(
+        role_path,
+        nodes=[
+            NodeRecord(
+                id="episode-graph",
+                type="Episode",
+                scope="global",
+                path="memory/episodes/graph.md",
+                title="图谱召回讨论",
+                keywords=("图谱召回",),
+            )
+        ],
+        edges=[],
+    )
+
+    result = discover_context_paths(role_path, query="图谱召回")
+
+    assert "memory/episodes/graph.md" not in result
+
+
+def test_discover_context_paths_falls_back_when_graph_candidates_are_ambiguous(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    workflow_dir = role_path / "brain" / "workflows"
+    workflow_dir.mkdir(parents=True, exist_ok=True)
+    (workflow_dir / "analysis.md").write_text("# Analysis\n\n正文。\n", encoding="utf-8")
+    (workflow_dir / "diagnose.md").write_text("# Diagnose\n\n正文。\n", encoding="utf-8")
+    save_graph(
+        role_path,
+        nodes=[
+            NodeRecord(
+                id="workflow-analysis",
+                type="Workflow",
+                scope="global",
+                path="brain/workflows/analysis.md",
+                title="原因 workflow",
+                keywords=("分析", "原因"),
+            ),
+            NodeRecord(
+                id="workflow-diagnose",
+                type="Workflow",
+                scope="global",
+                path="brain/workflows/diagnose.md",
+                title="原因 workflow",
+                keywords=("分析", "原因"),
+            ),
+        ],
+        edges=[],
+    )
+
+    result = discover_context_paths(role_path, query="分析这个原因")
+
+    assert "brain/workflows/analysis.md" not in result
+    assert "brain/workflows/diagnose.md" not in result
 
 
 def test_build_context_snapshot_respects_character_budget(tmp_role_home):

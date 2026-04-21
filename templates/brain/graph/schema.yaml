@@ -1,0 +1,45 @@
+graph_schema_version: "1.0"
+node_types:
+  - Project
+  - Workflow
+  - Rule
+  - Preference
+  - Principle
+  - Memory
+  - Episode
+  - Decision
+  - Evidence
+  - Concept
+  - Topic
+  - File
+edge_types:
+  - belongs_to
+  - contains
+  - applies_to
+  - depends_on
+  - specializes
+  - generalizes
+  - supersedes
+  - evidenced_by
+  - derived_from
+  - promoted_to
+  - supports
+  - contradicts
+  - mentions
+  - related_to
+  - covers
+  - records
+  - invalidated_by
+  - verifies
+statuses:
+  - active
+  - draft
+  - stale
+  - deprecated
+  - superseded
+  - invalidated
+  - archived
+confidences:
+  - high
+  - medium
+  - low

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 
+from tools.graph_index import ContextCandidate, recall_graph
 from tools.memory import build_frozen_snapshot
 from tools.workflow_index import WorkflowIndexEntry, parse_workflow_index
 
@@ -371,7 +372,62 @@ def discover_project_paths(role_path: Path, query: str) -> list[str]:
     return discovered
 
 
+def _expand_graph_candidate_path(role_path: Path, candidate: ContextCandidate) -> list[str]:
+    if not candidate.path:
+        return []
+
+    paths: list[str] = []
+    if candidate.path.startswith("projects/"):
+        parts = candidate.path.split("/")
+        if len(parts) >= 2:
+            if _is_nonempty_file(role_path / "projects/index.md"):
+                paths.append("projects/index.md")
+            context_path = f"projects/{parts[1]}/context.md"
+            if _is_nonempty_file(role_path / context_path):
+                paths.append(context_path)
+    elif candidate.path.startswith("brain/") and _is_nonempty_file(role_path / "brain/index.md"):
+        paths.append("brain/index.md")
+
+    if _is_nonempty_file(role_path / candidate.path):
+        paths.append(candidate.path)
+    return paths
+
+
+def _discover_graph_context_paths(role_path: Path, query: str) -> list[str]:
+    current_project_slug = _resolve_current_project_slug(role_path, query)
+    graph_result = recall_graph(
+        role_path,
+        query,
+        current_project_slug=current_project_slug,
+    )
+    if graph_result.fallback_required or not graph_result.candidates:
+        return []
+
+    discovered: list[str] = []
+    seen: set[str] = set()
+    for candidate in graph_result.candidates:
+        for path in _expand_graph_candidate_path(role_path, candidate):
+            if path not in seen:
+                seen.add(path)
+                discovered.append(path)
+
+    project_text = ""
+    for path in discovered:
+        if path.startswith("projects/") and path != "projects/index.md":
+            project_text += "\n" + (role_path / path).read_text(encoding="utf-8")
+    if "brain/" in project_text or any(hint in query.casefold() for hint in DOMAIN_HINTS):
+        for path in discover_brain_paths(role_path, query):
+            if path not in seen:
+                seen.add(path)
+                discovered.append(path)
+    return discovered
+
+
 def discover_context_paths(role_path: Path, query: str, max_brain_depth: int = 1) -> list[str]:
+    graph_paths = _discover_graph_context_paths(role_path, query)
+    if graph_paths:
+        return graph_paths
+
     workflow_paths = discover_workflow_paths(role_path, query)
     if workflow_paths:
         return workflow_paths

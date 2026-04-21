@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 
+from tools.file_ops import atomic_write_text
+
 
 @dataclass(frozen=True)
 class WorkflowIndexEntry:
@@ -90,5 +92,4 @@ def upsert_workflow_index_entry(index_path: Path, entry: WorkflowIndexEntry) -> 
             updated.append(current)
     if not replaced:
         updated.append(entry)
-    index_path.parent.mkdir(parents=True, exist_ok=True)
-    index_path.write_text(render_workflow_index(updated), encoding="utf-8")
+    atomic_write_text(index_path, render_workflow_index(updated))

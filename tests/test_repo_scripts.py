@@ -1,4 +1,23 @@
 from scripts.build_skill import build_skill, publish_skill
+from pathlib import Path
+import runpy
+import subprocess
+import sys
+
+
+def test_critical_role_tools_do_not_write_role_files_directly():
+    checked_files = [
+        Path("tools/workflow_index.py"),
+        Path("tools/memory.py"),
+        Path("tools/role_ops.py"),
+    ]
+    offenders: list[str] = []
+    for path in checked_files:
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if ".write_text(" in line:
+                offenders.append(f"{path}:{lineno}:{line.strip()}")
+
+    assert offenders == []
 
 
 def test_build_skill_creates_artifact_without_scripts(tmp_path):
@@ -11,14 +30,93 @@ def test_build_skill_creates_artifact_without_scripts(tmp_path):
     assert (artifact / "tools" / "role_ops.py").exists()
     assert (artifact / "tools" / "memory.py").exists()
     assert (artifact / "tools" / "context_router.py").exists()
+    assert (artifact / "tools" / "file_ops.py").exists()
+    assert (artifact / "tools" / "graph_index.py").exists()
     assert (artifact / "tools" / "workflow_index.py").exists()
     assert (artifact / "assets" / "templates" / "AGENT.md").exists()
+    assert (artifact / "assets" / "templates" / "brain" / "graph" / "schema.yaml").exists()
     assert (artifact / "assets" / "templates" / "interview-planner-system.md").exists()
     assert (artifact / "assets" / "templates" / "persona" / "narrative.md").exists()
     assert not (artifact / "assets" / "templates" / "self-model").exists()
     assert not (artifact / "agents").exists()
     assert not (artifact / "scripts").exists()
     assert not (artifact / "tools" / "__pycache__").exists()
+
+
+def test_build_skill_includes_graph_schema_template(tmp_path):
+    artifact = build_skill(output_root=tmp_path)
+
+    assert (artifact / "assets" / "templates" / "brain" / "graph" / "schema.yaml").exists()
+
+
+def test_upgrade_role_bootstraps_missing_graph_schema(tmp_path, monkeypatch):
+    role_home = tmp_path / ".roleMe"
+    role_dir = role_home / "self"
+    role_dir.mkdir(parents=True)
+    (role_dir / "role.json").write_text(
+        '{"roleName":"self","schemaVersion":"1.0"}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ROLEME_HOME", str(role_home))
+    monkeypatch.setattr("sys.argv", ["upgrade_role.py", "self"])
+
+    runpy.run_path("scripts/upgrade_role.py", run_name="__main__")
+
+    assert (role_dir / "brain" / "graph" / "schema.yaml").exists()
+    assert (role_dir / "brain" / "graph" / "indexes").is_dir()
+
+
+def test_validate_role_exits_nonzero_for_graph_warning(tmp_role_home, monkeypatch, capsys):
+    from tools.graph_index import EdgeRecord, save_graph
+    from tools.role_ops import initialize_role
+
+    role_path = initialize_role("self", skill_version="0.1.0")
+    save_graph(
+        role_path,
+        nodes=[],
+        edges=[
+            EdgeRecord(
+                id="edge-orphan",
+                type="related_to",
+                from_node="missing-source",
+                to_node="missing-target",
+            )
+        ],
+    )
+    monkeypatch.setattr("sys.argv", ["validate_role.py", "self"])
+
+    try:
+        runpy.run_path("scripts/validate_role.py", run_name="__main__")
+    except SystemExit as exc:
+        assert exc.code == 1
+    else:
+        raise AssertionError("validate_role.py should exit with non-zero status")
+
+    output = capsys.readouterr().out
+    assert "orphan edge source" in output
+
+
+def test_validate_role_script_imports_tools_when_run_by_path(tmp_role_home, tmp_path):
+    from tools.role_ops import initialize_role
+
+    initialize_role("self", skill_version="0.1.0")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path.cwd() / "scripts" / "validate_role.py"),
+            "self",
+        ],
+        cwd=tmp_path,
+        env={"ROLEME_HOME": str(tmp_role_home)},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert "ModuleNotFoundError" not in result.stderr
+    assert result.returncode == 0
+    assert "ok: self" in result.stdout
 
 
 def test_build_skill_ignores_python_cache_files(tmp_path, monkeypatch):
@@ -128,6 +226,18 @@ def test_build_skill_includes_natural_language_archive_guidance(tmp_path):
     assert "判断不够确定时，优先写入 `memory/episodes/` 或项目记忆" in skill_md
     assert "## 自然语言归档" in usage_md
     assert "用户只需要自然表达内容，系统会先总结，再选择目标位置。" in usage_md
+
+
+def test_build_skill_documents_context_graph_as_background_mechanism(tmp_path):
+    artifact = build_skill(output_root=tmp_path)
+    skill_md = (artifact / "SKILL.md").read_text(encoding="utf-8")
+    usage_md = (artifact / "references" / "usage.md").read_text(encoding="utf-8")
+
+    assert "Context Graph 是后台机制" in usage_md
+    assert "不改变用户正常对话方式" in usage_md
+    assert "ROLEME_GRAPH_ROUTING=0" in usage_md
+    assert "ROLEME_GRAPH_ARCHIVE=0" in usage_md
+    assert "用户不需要直接维护 Graph" in skill_md
 
 
 def test_publish_skill_writes_repo_publish_directory(tmp_path, monkeypatch):
