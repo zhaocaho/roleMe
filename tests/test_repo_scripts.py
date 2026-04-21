@@ -1,5 +1,6 @@
 from scripts.build_skill import build_skill, publish_skill
 from pathlib import Path
+import runpy
 
 
 def test_critical_role_tools_do_not_write_role_files_directly():
@@ -27,8 +28,11 @@ def test_build_skill_creates_artifact_without_scripts(tmp_path):
     assert (artifact / "tools" / "role_ops.py").exists()
     assert (artifact / "tools" / "memory.py").exists()
     assert (artifact / "tools" / "context_router.py").exists()
+    assert (artifact / "tools" / "file_ops.py").exists()
+    assert (artifact / "tools" / "graph_index.py").exists()
     assert (artifact / "tools" / "workflow_index.py").exists()
     assert (artifact / "assets" / "templates" / "AGENT.md").exists()
+    assert (artifact / "assets" / "templates" / "brain" / "graph" / "schema.yaml").exists()
     assert (artifact / "assets" / "templates" / "interview-planner-system.md").exists()
     assert (artifact / "assets" / "templates" / "persona" / "narrative.md").exists()
     assert not (artifact / "assets" / "templates" / "self-model").exists()
@@ -41,6 +45,53 @@ def test_build_skill_includes_graph_schema_template(tmp_path):
     artifact = build_skill(output_root=tmp_path)
 
     assert (artifact / "assets" / "templates" / "brain" / "graph" / "schema.yaml").exists()
+
+
+def test_upgrade_role_bootstraps_missing_graph_schema(tmp_path, monkeypatch):
+    role_home = tmp_path / ".roleMe"
+    role_dir = role_home / "self"
+    role_dir.mkdir(parents=True)
+    (role_dir / "role.json").write_text(
+        '{"roleName":"self","schemaVersion":"1.0"}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ROLEME_HOME", str(role_home))
+    monkeypatch.setattr("sys.argv", ["upgrade_role.py", "self"])
+
+    runpy.run_path("scripts/upgrade_role.py", run_name="__main__")
+
+    assert (role_dir / "brain" / "graph" / "schema.yaml").exists()
+    assert (role_dir / "brain" / "graph" / "indexes").is_dir()
+
+
+def test_validate_role_exits_nonzero_for_graph_warning(tmp_role_home, monkeypatch, capsys):
+    from tools.graph_index import EdgeRecord, save_graph
+    from tools.role_ops import initialize_role
+
+    role_path = initialize_role("self", skill_version="0.1.0")
+    save_graph(
+        role_path,
+        nodes=[],
+        edges=[
+            EdgeRecord(
+                id="edge-orphan",
+                type="related_to",
+                from_node="missing-source",
+                to_node="missing-target",
+            )
+        ],
+    )
+    monkeypatch.setattr("sys.argv", ["validate_role.py", "self"])
+
+    try:
+        runpy.run_path("scripts/validate_role.py", run_name="__main__")
+    except SystemExit as exc:
+        assert exc.code == 1
+    else:
+        raise AssertionError("validate_role.py should exit with non-zero status")
+
+    output = capsys.readouterr().out
+    assert "orphan edge source" in output
 
 
 def test_build_skill_ignores_python_cache_files(tmp_path, monkeypatch):

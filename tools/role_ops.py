@@ -2089,4 +2089,6 @@ def doctor_role(role_name: str) -> DoctorReport:
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
         if payload.get("schemaVersion") != SCHEMA_VERSION:
             warnings.append(f"schema mismatch: {payload.get('schemaVersion')}")
+    graph_report = doctor_graph(base_path)
+    warnings.extend(graph_report.warnings)
     return DoctorReport(missing_files=missing, warnings=warnings)

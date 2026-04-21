@@ -914,7 +914,7 @@ git commit -m "feat: archive role knowledge into context graph"
 - 修改：`tests/test_role_ops.py`
 - 修改：`tests/test_repo_scripts.py`
 
-- [ ] **步骤 1：写失败测试**
+- [x] **步骤 1：写失败测试**
 
 覆盖：
 
@@ -922,7 +922,7 @@ git commit -m "feat: archive role knowledge into context graph"
 - `scripts/upgrade_role.py self` 会创建缺失的 `brain/graph/schema.yaml`
 - `scripts/validate_role.py self` 在 Graph 损坏时返回非 0，并输出 warning
 
-- [ ] **步骤 2：聚合 doctor**
+- [x] **步骤 2：聚合 doctor**
 
 在 `doctor_role()` 中追加：
 
@@ -931,7 +931,7 @@ graph_report = doctor_graph(base_path)
 warnings.extend(graph_report.warnings)
 ```
 
-- [ ] **步骤 3：更新 upgrade**
+- [x] **步骤 3：更新 upgrade**
 
 `scripts/upgrade_role.py` 只做 bootstrap：
 
@@ -940,11 +940,11 @@ warnings.extend(graph_report.warnings)
 - 缺失时写入当前 `templates/brain/graph/schema.yaml`
 - 不扫描全量 Markdown
 
-- [ ] **步骤 4：更新 validate**
+- [x] **步骤 4：更新 validate**
 
 `scripts/validate_role.py` 输出 missing / warning，并在存在问题时 `SystemExit(1)`。
 
-- [ ] **步骤 5：运行测试**
+- [x] **步骤 5：运行测试**
 
 运行：`python3 -m pytest tests/test_role_ops.py::test_doctor_role_includes_graph_warnings tests/test_repo_scripts.py -v`
 
@@ -964,7 +964,7 @@ git commit -m "feat: validate and upgrade context graph"
 - 如需要修改：`scripts/build_skill.py`
 - 生成更新：`skills/roleme/`
 
-- [ ] **步骤 1：增加打包断言**
+- [x] **步骤 1：增加打包断言**
 
 在 `test_build_skill_creates_artifact_without_scripts()` 中增加：
 
@@ -974,13 +974,13 @@ assert (artifact / "tools" / "graph_index.py").exists()
 assert (artifact / "assets" / "templates" / "brain" / "graph" / "schema.yaml").exists()
 ```
 
-- [ ] **步骤 2：运行测试**
+- [x] **步骤 2：运行测试**
 
 运行：`python3 -m pytest tests/test_repo_scripts.py -v`
 
 预期：通过。如果失败，修正测试 fixture 或 `build_skill()`。
 
-- [ ] **步骤 3：发布本地 skill 包**
+- [x] **步骤 3：发布本地 skill 包**
 
 运行：`python3 scripts/build_skill.py`
 

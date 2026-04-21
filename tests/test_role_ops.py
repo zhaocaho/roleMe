@@ -4,7 +4,7 @@ import re
 
 import tools.role_ops as role_ops
 from tools.context_router import discover_context_paths
-from tools.graph_index import load_graph
+from tools.graph_index import EdgeRecord, load_graph, save_graph
 from tools.role_ops import (
     ProjectIdentity,
     RoleInterview,
@@ -326,6 +326,27 @@ def test_doctor_role_reports_missing_file(tmp_role_home):
 
     report = doctor_role("self")
     assert "AGENT.md" in report.missing_files
+
+
+def test_doctor_role_includes_graph_warnings(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    save_graph(
+        role_path,
+        nodes=[],
+        edges=[
+            EdgeRecord(
+                id="edge-orphan",
+                type="related_to",
+                from_node="missing-source",
+                to_node="missing-target",
+            )
+        ],
+    )
+
+    report = doctor_role("self")
+
+    assert "orphan edge source: edge-orphan -> missing-source" in report.warnings
+    assert "orphan edge target: edge-orphan -> missing-target" in report.warnings
 
 
 def test_initialize_role_accepts_chinese_role_name(tmp_role_home):
