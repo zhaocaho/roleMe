@@ -809,7 +809,13 @@ git commit -m "feat: archive workflows into context graph"
 - 修改：`tests/test_memory.py`
 - 修改：`tests/test_role_ops.py`
 
-- [ ] **步骤 1：写失败测试**
+**失败策略补充：**
+
+- `memory.py` 的 `write_memory()`、`summarize_and_write()`、`replace_memory_entry()` 等低层记忆写入入口以 Markdown 为优先结果；Graph 同步失败时不向上抛异常，不阻断用户侧记忆落盘。
+- `role_ops.py` 中有结构化返回值的归档入口，例如 workflow archive 与 `archive_decision()`，Graph 写入失败时应返回 partial state：`markdown_written=True`、`graph_updated=False`、`graph_skipped=False`，并在 `doctor_warnings` 中记录失败原因。
+- `ROLEME_GRAPH_ARCHIVE=0` 仍表示显式跳过 Graph：Markdown 正常写入，返回值中 `graph_skipped=True`。
+
+- [x] **步骤 1：写失败测试**
 
 在 `tests/test_memory.py` 增加：
 
@@ -826,7 +832,7 @@ git commit -m "feat: archive workflows into context graph"
 - 新增 `archive_decision()` 写入 `Decision`、`Evidence` 和 `Decision evidenced_by Evidence`
 - `archive_decision()` 可选写入 `supersedes` 关系时，旧 `Decision.status` 更新为 `superseded`
 
-- [ ] **步骤 2：实现 marker**
+- [x] **步骤 2：实现 marker**
 
 在 `tools/memory.py` 中增加：
 
@@ -840,7 +846,7 @@ ENTRY_MARKER_PATTERN = re.compile(r"<!-- roleme-entry:([a-z0-9_-]+) -->")
 - `_format_entry_with_marker(content)`
 - `_strip_entry_marker(entry)`
 
-- [ ] **步骤 3：写入 memory graph 节点**
+- [x] **步骤 3：写入 memory graph 节点**
 
 规则：
 
@@ -851,7 +857,7 @@ ENTRY_MARKER_PATTERN = re.compile(r"<!-- roleme-entry:([a-z0-9_-]+) -->")
 - entry-backed 节点必须写 `metadata.entry_key`
 - `ROLEME_GRAPH_ARCHIVE=0` 时只写 Markdown，不写 Graph
 
-- [ ] **步骤 4：写入 brain topic graph 节点**
+- [x] **步骤 4：写入 brain topic graph 节点**
 
 在 `tools/role_ops.py::initialize_role_from_interview()` 的 `brain_topics` 落盘逻辑中同步写入：
 
@@ -861,7 +867,7 @@ ENTRY_MARKER_PATTERN = re.compile(r"<!-- roleme-entry:([a-z0-9_-]+) -->")
 
 同一路径已经有 `Topic` 时，不额外创建 `File` 节点。
 
-- [ ] **步骤 5：新增最小 decision archive 入口**
+- [x] **步骤 5：新增最小 decision archive 入口**
 
 在 `tools/role_ops.py` 增加 `archive_decision()`，只实现设计文档要求的确定性后台入口，不新增用户交互流程：
 
@@ -884,7 +890,7 @@ class DecisionArchiveResult:
 - `supersedes_id` 存在时 upsert `Decision supersedes Decision`，并把旧 decision 标为 `superseded`
 - `ROLEME_GRAPH_ARCHIVE=0` 时只写 Markdown，不写 Graph
 
-- [ ] **步骤 6：运行测试**
+- [x] **步骤 6：运行测试**
 
 运行：`python3 -m pytest tests/test_memory.py tests/test_role_ops.py -k "memory or topic or decision" -v`
 

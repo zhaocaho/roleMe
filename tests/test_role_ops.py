@@ -11,6 +11,7 @@ from tools.role_ops import (
     RoleInterviewProject,
     RoleInterviewTopic,
     WorkflowArchivePlan,
+    archive_decision,
     archive_general_workflow,
     archive_project_workflow,
     assess_interview_gaps,
@@ -754,6 +755,12 @@ def test_finalize_role_interview_writes_role_bundle_from_session(tmp_role_home):
     assert "Current priority is interview orchestration" in (
         role_path / "projects" / "roleme" / "memory.md"
     ).read_text(encoding="utf-8")
+    graph = load_graph(role_path)
+    topic = next(node for node in graph.nodes if node.type == "Topic")
+    concept = next(node for node in graph.nodes if node.type == "Concept")
+    assert topic.path == "brain/topics/ai-product.md"
+    assert concept.title == "AI Product"
+    assert any(edge.type == "covers" and edge.from_node == topic.id and edge.to_node == concept.id for edge in graph.edges)
 
 
 def test_finalize_role_interview_merges_language_preference_into_user_memory(tmp_role_home):
@@ -1039,3 +1046,72 @@ def test_archive_general_workflow_returns_partial_state_when_graph_write_fails(
     assert result.graph_updated is False
     assert result.graph_skipped is False
     assert result.doctor_warnings == ("graph archive failed: graph boom",)
+
+
+def test_archive_decision_writes_decision_and_evidence(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+
+    result = archive_decision(
+        role_path,
+        title="Use graph as background index",
+        summary="Graph routes context while Markdown remains source of truth.",
+        rationale="Keeps user workflow stable and preserves fallback behavior.",
+    )
+
+    graph = load_graph(role_path)
+    decision = next(node for node in graph.nodes if node.type == "Decision")
+    assert result.markdown_written is True
+    assert result.graph_updated is True
+    assert decision.title == "Use graph as background index"
+    assert any(node.type == "Evidence" and node.metadata.get("source_path") in result.written_paths for node in graph.nodes)
+    assert any(edge.type == "evidenced_by" and edge.from_node == decision.id for edge in graph.edges)
+
+
+def test_archive_decision_returns_partial_state_when_graph_write_fails(
+    tmp_role_home,
+    monkeypatch,
+):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    monkeypatch.setattr(
+        role_ops,
+        "_persist_graph",
+        lambda role_path, nodes, edges: (_ for _ in ()).throw(RuntimeError("graph boom")),
+    )
+
+    result = archive_decision(
+        role_path,
+        title="Use graph as background index",
+        summary="Graph routes context while Markdown remains source of truth.",
+        rationale="Keeps user workflow stable and preserves fallback behavior.",
+    )
+
+    assert (role_path / result.written_paths[0]).exists()
+    assert result.markdown_written is True
+    assert result.graph_updated is False
+    assert result.graph_skipped is False
+    assert result.doctor_warnings == ("graph archive failed: graph boom",)
+
+
+def test_archive_decision_can_supersede_existing_decision(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    first = archive_decision(
+        role_path,
+        title="Old decision",
+        summary="Use only Markdown.",
+        rationale="Initial simple design.",
+    )
+    old_id = first.decision_id
+
+    second = archive_decision(
+        role_path,
+        title="New decision",
+        summary="Use Markdown plus Graph metadata.",
+        rationale="Need better routing while preserving Markdown.",
+        supersedes_id=old_id,
+    )
+
+    graph = load_graph(role_path)
+    old_decision = next(node for node in graph.nodes if node.id == old_id)
+    new_decision = next(node for node in graph.nodes if node.id == second.decision_id)
+    assert old_decision.status == "superseded"
+    assert any(edge.type == "supersedes" and edge.from_node == new_decision.id and edge.to_node == old_id for edge in graph.edges)

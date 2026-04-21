@@ -7,6 +7,8 @@ from tools.memory import (
     summarize_and_write,
     write_memory,
 )
+from tools.graph_index import load_graph
+import tools.memory as memory
 from tools.role_ops import initialize_role
 
 
@@ -111,6 +113,24 @@ def test_summarize_and_write_deduplicates_entries(tmp_role_home):
     assert result["summary_hits"].count("- default Chinese communication") == 1
 
 
+def test_summarize_and_write_deduplicates_legacy_unmarked_entries(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    memory_path = role_path / "memory" / "MEMORY.md"
+    memory_text = memory_path.read_text(encoding="utf-8")
+    memory_path.write_text(
+        memory_text.replace(
+            "<!-- ROLEME:ENTRIES:START -->\n",
+            "<!-- ROLEME:ENTRIES:START -->\n- legacy preference\n",
+        ),
+        encoding="utf-8",
+    )
+
+    summarize_and_write(role_path, target="memory", source_text="legacy preference")
+
+    result = recall(role_path, "legacy preference")
+    assert result["summary_hits"] == ["- legacy preference"]
+
+
 def test_write_memory_supports_episode_and_promotion(tmp_role_home):
     role_path = initialize_role("self", skill_version="0.1.0")
     episode_path = write_memory(
@@ -129,6 +149,96 @@ def test_write_memory_supports_episode_and_promotion(tmp_role_home):
     assert result["summary_hits"] == [
         "- explain code with the conclusion first and details after"
     ]
+
+
+def test_write_memory_user_entry_writes_marker_and_preference_graph(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+
+    write_memory(role_path, target="user", content="default Chinese communication")
+
+    user_text = (role_path / "memory" / "USER.md").read_text(encoding="utf-8")
+    graph = load_graph(role_path)
+    preference = next(node for node in graph.nodes if node.type == "Preference")
+
+    assert "<!-- roleme-entry:" in user_text
+    assert preference.path == "memory/USER.md"
+    assert preference.metadata["entry_key"]
+    assert any(node.type == "Evidence" for node in graph.nodes)
+    assert any(edge.type == "evidenced_by" and edge.from_node == preference.id for edge in graph.edges)
+
+
+def test_write_memory_keeps_markdown_when_graph_write_fails(tmp_role_home, monkeypatch):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    monkeypatch.setattr(
+        memory,
+        "_persist_graph",
+        lambda role_path, nodes, edges: (_ for _ in ()).throw(RuntimeError("graph boom")),
+    )
+
+    write_memory(role_path, target="user", content="default Chinese communication")
+
+    user_text = (role_path / "memory" / "USER.md").read_text(encoding="utf-8")
+    assert "default Chinese communication" in user_text
+    assert "<!-- roleme-entry:" in user_text
+
+
+def test_write_memory_memory_entry_writes_principle_graph(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+
+    write_memory(role_path, target="memory", content="lead with the conclusion")
+
+    graph = load_graph(role_path)
+    principle = next(node for node in graph.nodes if node.type == "Principle")
+    assert principle.path == "memory/MEMORY.md"
+    assert principle.metadata["entry_key"]
+    assert any(edge.type == "evidenced_by" and edge.from_node == principle.id for edge in graph.edges)
+
+
+def test_write_memory_episode_writes_episode_and_evidence_graph(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+
+    episode_path = write_memory(
+        role_path,
+        target="episode",
+        content="Important preference: explain code with the conclusion first.",
+    )
+
+    graph = load_graph(role_path)
+    episode = next(node for node in graph.nodes if node.type == "Episode")
+    assert episode.path == "memory/episodes/episode-001.md"
+    assert episode_path == role_path / episode.path
+    assert any(node.type == "Evidence" and node.path == episode.path for node in graph.nodes)
+    assert any(edge.type == "evidenced_by" and edge.from_node == episode.id for edge in graph.edges)
+
+
+def test_build_frozen_snapshot_strips_roleme_entry_markers(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    write_memory(role_path, target="user", content="default Chinese communication")
+
+    snapshot = build_frozen_snapshot(role_path, max_chars=1200)
+
+    assert "default Chinese communication" in snapshot
+    assert "roleme-entry" not in snapshot
+
+
+def test_replace_memory_entry_keeps_entry_backed_node_stable(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    write_memory(role_path, target="user", content="default Chinese communication")
+    before = load_graph(role_path)
+    preference_before = next(node for node in before.nodes if node.type == "Preference")
+
+    changed = replace_memory_entry(
+        role_path,
+        target="user",
+        old_content="default Chinese communication",
+        new_content="default concise Chinese communication",
+    )
+
+    after = load_graph(role_path)
+    preference_after = next(node for node in after.nodes if node.type == "Preference")
+    assert changed is True
+    assert preference_after.id == preference_before.id
+    assert preference_after.title == "default concise Chinese communication"
 
 
 def test_replace_memory_entry_updates_existing_value(tmp_role_home):

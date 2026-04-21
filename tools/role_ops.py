@@ -164,6 +164,16 @@ class WorkflowArchiveResult:
 
 
 @dataclass(frozen=True)
+class DecisionArchiveResult:
+    written_paths: list[str]
+    markdown_written: bool
+    graph_updated: bool
+    graph_skipped: bool
+    decision_id: str
+    doctor_warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class RoleEntryPrompt:
     existing_roles: list[str]
     prompt: str
@@ -520,6 +530,27 @@ def _write_if_missing(path: Path, content: str) -> None:
 
 def _graph_archive_enabled() -> bool:
     return os.environ.get("ROLEME_GRAPH_ARCHIVE", "1") != "0"
+
+
+def _short_key(value: str) -> str:
+    return hashlib.sha1(value.encode("utf-8")).hexdigest()[:12]
+
+
+def _replace_node_status(node: NodeRecord, status: str) -> NodeRecord:
+    return NodeRecord(
+        id=node.id,
+        type=node.type,
+        scope=node.scope,
+        project_slug=node.project_slug,
+        path=node.path,
+        title=node.title,
+        summary=node.summary,
+        aliases=node.aliases,
+        keywords=node.keywords,
+        status=status,
+        confidence=node.confidence,
+        metadata=node.metadata,
+    )
 
 
 def _persist_graph(role_path: Path, nodes: list[NodeRecord], edges: list[EdgeRecord]) -> tuple[str, ...]:
@@ -900,6 +931,8 @@ def _upsert_workflow_graph(
         for memory_entry in plan.project_memory:
             safe_entry = sanitize_archive_entry(memory_entry)
             memory_path = f"projects/{plan.project_slug}/memory.md"
+            memory_key = _short_key(safe_entry)
+            evidence_key = _short_key(f"evidence:{safe_entry}")
             memory = NodeRecord(
                 id=deterministic_node_id(
                     node_type="Memory",
@@ -907,14 +940,14 @@ def _upsert_workflow_graph(
                     project_slug=plan.project_slug,
                     path=memory_path,
                     title=safe_entry,
-                    metadata={"entry_key": hashlib.sha1(safe_entry.encode("utf-8")).hexdigest()[:12]},
+                    metadata={"entry_key": memory_key},
                 ),
                 type="Memory",
                 scope="project",
                 project_slug=plan.project_slug,
                 path=memory_path,
                 title=safe_entry,
-                metadata={"entry_key": hashlib.sha1(safe_entry.encode("utf-8")).hexdigest()[:12]},
+                metadata={"entry_key": memory_key},
             )
             evidence_node = NodeRecord(
                 id=deterministic_node_id(
@@ -923,7 +956,7 @@ def _upsert_workflow_graph(
                     project_slug=plan.project_slug,
                     path=memory_path,
                     title=f"Evidence for {safe_entry}",
-                    metadata={"entry_key": hashlib.sha1(f'evidence:{safe_entry}'.encode("utf-8")).hexdigest()[:12]},
+                    metadata={"entry_key": evidence_key},
                 ),
                 type="Evidence",
                 scope="project",
@@ -975,6 +1008,159 @@ def _safe_upsert_workflow_graph(
         return graph_updated, False, warnings
     except Exception as exc:
         return False, False, (f"graph archive failed: {exc}",)
+
+
+def _upsert_topic_graph_node(
+    role_path: Path,
+    topic: RoleInterviewTopic,
+) -> tuple[bool, tuple[str, ...]]:
+    if not _graph_archive_enabled():
+        return False, ()
+
+    graph = load_graph(role_path)
+    topic_path = f"brain/topics/{topic.slug}.md"
+    topic_node = NodeRecord(
+        id=deterministic_node_id(
+            node_type="Topic",
+            scope="global",
+            path=topic_path,
+            title=topic.title,
+        ),
+        type="Topic",
+        scope="global",
+        path=topic_path,
+        title=topic.title,
+        summary=topic.summary,
+        aliases=(topic.title,),
+    )
+    concept = NodeRecord(
+        id=deterministic_node_id(
+            node_type="Concept",
+            scope="global",
+            title=topic.title,
+        ),
+        type="Concept",
+        scope="global",
+        title=topic.title,
+        summary=topic.summary,
+        aliases=(topic.title,),
+    )
+    edge = EdgeRecord(
+        id=deterministic_edge_id(topic_node.id, "covers", concept.id),
+        type="covers",
+        from_node=topic_node.id,
+        to_node=concept.id,
+    )
+    nodes = upsert_node(graph.nodes, topic_node)
+    nodes = upsert_node(nodes, concept)
+    edges = upsert_edge(graph.edges, edge)
+    warnings = _persist_graph(role_path, nodes, edges)
+    return True, warnings
+
+
+def archive_decision(
+    role_path: Path,
+    title: str,
+    summary: str,
+    rationale: str,
+    source_path: str | None = None,
+    supersedes_id: str | None = None,
+) -> DecisionArchiveResult:
+    title = sanitize_archive_entry(title)
+    summary = sanitize_archived_markdown(summary, minimum_chars=4)
+    rationale = sanitize_archived_markdown(rationale, minimum_chars=4)
+    if source_path is None:
+        episodes_dir = role_path / "memory" / "episodes"
+        episode_path = episodes_dir / f"episode-{len(list(episodes_dir.glob('*.md'))) + 1:03d}.md"
+        source_path = f"memory/episodes/{episode_path.name}"
+        atomic_write_text(
+            episode_path,
+            f"# {title}\n\n{summary}\n\n## Rationale\n\n{rationale}\n",
+        )
+    written_paths = [source_path]
+
+    decision_id = deterministic_node_id(
+        node_type="Decision",
+        scope="global",
+        title=title,
+    )
+    if not _graph_archive_enabled():
+        return DecisionArchiveResult(
+            written_paths=written_paths,
+            markdown_written=True,
+            graph_updated=False,
+            graph_skipped=True,
+            decision_id=decision_id,
+        )
+
+    graph = load_graph(role_path)
+    decision = NodeRecord(
+        id=decision_id,
+        type="Decision",
+        scope="global",
+        title=title,
+        summary=summary,
+        metadata={"rationale": rationale},
+    )
+    evidence = NodeRecord(
+        id=deterministic_node_id(
+            node_type="Evidence",
+            scope="global",
+            title=f"Evidence for {title}",
+            metadata={"entry_key": _short_key(source_path)},
+        ),
+        type="Evidence",
+        scope="global",
+        path=source_path,
+        title=f"Evidence for {title}",
+        metadata={"source_type": "decision_archive", "source_path": source_path},
+    )
+    nodes = upsert_node(graph.nodes, decision)
+    nodes = upsert_node(nodes, evidence)
+    edges = upsert_edge(
+        graph.edges,
+        EdgeRecord(
+            id=deterministic_edge_id(decision.id, "evidenced_by", evidence.id),
+            type="evidenced_by",
+            from_node=decision.id,
+            to_node=evidence.id,
+        ),
+    )
+    if supersedes_id:
+        nodes = [
+            _replace_node_status(node, "superseded")
+            if node.id == supersedes_id
+            else node
+            for node in nodes
+        ]
+        edges = upsert_edge(
+            edges,
+            EdgeRecord(
+                id=deterministic_edge_id(decision.id, "supersedes", supersedes_id),
+                type="supersedes",
+                from_node=decision.id,
+                to_node=supersedes_id,
+            ),
+        )
+    try:
+        warnings = _persist_graph(role_path, nodes, edges)
+    except Exception as exc:
+        return DecisionArchiveResult(
+            written_paths=written_paths,
+            markdown_written=True,
+            graph_updated=False,
+            graph_skipped=False,
+            decision_id=decision.id,
+            doctor_warnings=(f"graph archive failed: {exc}",),
+        )
+    return DecisionArchiveResult(
+        written_paths=written_paths,
+        markdown_written=True,
+        graph_updated=True,
+        graph_skipped=False,
+        decision_id=decision.id,
+        doctor_warnings=warnings,
+    )
 
 
 def archive_general_workflow(plan: WorkflowArchivePlan) -> WorkflowArchiveResult:
@@ -1778,6 +1964,7 @@ def initialize_role_from_interview(
     for topic in interview.brain_topics:
         topic_path = destination / "brain" / "topics" / f"{topic.slug}.md"
         atomic_write_text(topic_path, topic.content.strip() + "\n")
+        _upsert_topic_graph_node(destination, topic)
         brain_index_lines.append(f"- {topic.title}: topics/{topic.slug}.md")
         if topic.summary:
             brain_index_lines.append(f"  - {topic.summary}")
