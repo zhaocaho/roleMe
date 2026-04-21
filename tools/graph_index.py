@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 from typing import Any
@@ -21,7 +22,23 @@ REQUIRED_SCHEMA_SECTIONS = (
 )
 PATH_BACKED_TYPES = {"File", "Project", "Topic", "Workflow"}
 ENTRY_BACKED_TYPES = {"Memory", "Preference", "Principle"}
-STRONG_TYPES = {"Workflow", "Rule", "Preference", "Principle"}
+STRONG_TYPES = {"Project", "Workflow", "Rule", "Preference", "Principle", "Concept"}
+WEAK_TYPES = {"Memory", "Episode", "Decision", "Topic", "File"}
+INACTIVE_STATUSES = {"invalidated", "deprecated", "superseded"}
+WEAK_QUERY_HINTS = {
+    "history",
+    "source",
+    "evidence",
+    "conflict",
+    "past",
+    "episode",
+    "历史",
+    "来源",
+    "证据",
+    "冲突",
+    "以前",
+    "记录",
+}
 EVIDENCE_REQUIRED_EDGE_TYPES = {
     "supersedes",
     "invalidated_by",
@@ -140,6 +157,25 @@ class GraphDoctorReport:
 @dataclass(frozen=True)
 class GraphOptimizeResult:
     repairs: list[str]
+    warnings: list[str]
+
+
+@dataclass(frozen=True)
+class ContextCandidate:
+    node_id: str
+    path: str | None
+    score: float
+    recall_strength: str
+    status: str
+    confidence: str
+    reasons: tuple[str, ...]
+    trust_flags: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class GraphRecallResult:
+    candidates: list[ContextCandidate]
+    fallback_required: bool
     warnings: list[str]
 
 
@@ -494,3 +530,143 @@ def optimize_graph(role_path: Path) -> GraphOptimizeResult:
     rebuild_indexes(role_path, nodes)
     warnings = doctor_graph(role_path).warnings
     return GraphOptimizeResult(repairs=repairs, warnings=warnings)
+
+
+def _recall_terms(text: str) -> set[str]:
+    normalized = text.casefold()
+    terms = {token for token in re.findall(r"[a-z0-9_]+", normalized)}
+    for run in re.findall(r"[\u4e00-\u9fff]+", normalized):
+        terms.add(run)
+        if len(run) == 1:
+            continue
+        for index in range(len(run) - 1):
+            terms.add(run[index : index + 2])
+    return {term for term in terms if term}
+
+
+def _node_terms(node: NodeRecord) -> dict[str, set[str]]:
+    return {
+        "title": _recall_terms(node.title),
+        "summary": _recall_terms(node.summary),
+        "aliases": set().union(*(_recall_terms(alias) for alias in node.aliases))
+        if node.aliases
+        else set(),
+        "keywords": set().union(*(_recall_terms(keyword) for keyword in node.keywords))
+        if node.keywords
+        else set(),
+        "path": _recall_terms(node.path or ""),
+    }
+
+
+def _score_node(
+    node: NodeRecord,
+    query_terms: set[str],
+    current_project_slug: str | None,
+) -> tuple[float, list[str], list[str]]:
+    term_groups = _node_terms(node)
+    score = 0.0
+    reasons: list[str] = []
+    trust_flags: list[str] = []
+
+    weights = {
+        "aliases": 4.0,
+        "keywords": 3.0,
+        "title": 2.0,
+        "summary": 1.0,
+        "path": 1.0,
+    }
+    for group, terms in term_groups.items():
+        matches = query_terms & terms
+        if not matches:
+            continue
+        score += weights[group] * len(matches)
+        reasons.append(f"{group}: {', '.join(sorted(matches))}")
+
+    if current_project_slug and node.project_slug == current_project_slug:
+        score += 2.0
+        reasons.append("current project")
+
+    if node.confidence == "low":
+        score *= 0.5
+        trust_flags.append("low-confidence")
+    elif node.confidence == "medium":
+        score *= 0.8
+        trust_flags.append("medium-confidence")
+
+    if node.status == "stale":
+        score *= 0.6
+        trust_flags.append("stale")
+
+    return score, reasons, trust_flags
+
+
+def _include_weak_candidates(query: str, strong_candidates: list[ContextCandidate]) -> bool:
+    _ = strong_candidates
+    normalized = query.casefold()
+    return any(hint in normalized for hint in WEAK_QUERY_HINTS)
+
+
+def recall_graph(
+    role_path: Path,
+    query: str,
+    current_project_slug: str | None = None,
+) -> GraphRecallResult:
+    if os.environ.get("ROLEME_GRAPH_ROUTING") == "0":
+        return GraphRecallResult(candidates=[], fallback_required=True, warnings=["graph routing disabled"])
+    if os.environ.get("ROLEME_GRAPH_ARCHIVE") == "0":
+        return GraphRecallResult(candidates=[], fallback_required=True, warnings=["graph archive disabled"])
+
+    warnings: list[str] = []
+    try:
+        validate_schema_text(load_schema_text(role_path))
+        graph = load_graph(role_path)
+    except Exception as exc:
+        return GraphRecallResult(candidates=[], fallback_required=True, warnings=[str(exc)])
+
+    query_terms = _recall_terms(query)
+    if not query_terms:
+        return GraphRecallResult(candidates=[], fallback_required=True, warnings=[])
+
+    strong_candidates: list[ContextCandidate] = []
+    weak_candidates: list[ContextCandidate] = []
+    for node in graph.nodes:
+        if node.status in INACTIVE_STATUSES or not node.path:
+            continue
+        if not (role_path / _normalize_path(node.path)).exists():
+            continue
+
+        if node.type in STRONG_TYPES:
+            recall_strength = "strong"
+        elif node.type in WEAK_TYPES:
+            recall_strength = "weak"
+        else:
+            continue
+
+        score, reasons, trust_flags = _score_node(node, query_terms, current_project_slug)
+        if score < 4.0:
+            continue
+        candidate = ContextCandidate(
+            node_id=node.id,
+            path=_normalize_path(node.path),
+            score=score,
+            recall_strength=recall_strength,
+            status=node.status,
+            confidence=node.confidence,
+            reasons=tuple(reasons),
+            trust_flags=tuple(trust_flags),
+        )
+        if recall_strength == "strong":
+            strong_candidates.append(candidate)
+        else:
+            weak_candidates.append(candidate)
+
+    candidates = list(strong_candidates)
+    if _include_weak_candidates(query, strong_candidates):
+        candidates.extend(weak_candidates)
+    candidates.sort(key=lambda candidate: (candidate.score, candidate.path or ""), reverse=True)
+
+    if len(candidates) > 1 and candidates[0].score - candidates[1].score < 2.0:
+        warnings.append("ambiguous graph recall candidates")
+        return GraphRecallResult(candidates=[], fallback_required=True, warnings=warnings)
+
+    return GraphRecallResult(candidates=candidates, fallback_required=False, warnings=warnings)

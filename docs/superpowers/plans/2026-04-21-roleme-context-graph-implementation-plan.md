@@ -1020,7 +1020,7 @@ git commit -m "build: package context graph runtime"
 - 修改：`tools/context_router.py`
 - 修改：`tests/test_context_router.py`
 
-- [ ] **步骤 1：写失败测试**
+- [x] **步骤 1：写失败测试**
 
 在 `tests/test_context_router.py` 增加：
 
@@ -1031,7 +1031,7 @@ git commit -m "build: package context graph runtime"
 - 弱召回未触发时 `Memory / Episode / Decision / Topic / File` 不进入正文预算
 - 第一名和第二名分差过小时回退旧路由或请求澄清，不强行选择
 
-- [ ] **步骤 2：增加 recall 数据结构**
+- [x] **步骤 2：增加 recall 数据结构**
 
 在 `tools/graph_index.py` 中增加：
 
@@ -1055,7 +1055,7 @@ class GraphRecallResult:
     warnings: list[str]
 ```
 
-- [ ] **步骤 3：实现 `recall_graph()`**
+- [x] **步骤 3：实现 `recall_graph()`**
 
 规则：
 
@@ -1068,7 +1068,7 @@ class GraphRecallResult:
 - 当前项目加权
 - alias / keyword / title / summary 命中加权
 
-- [ ] **步骤 4：接入 `context_router.py`**
+- [x] **步骤 4：接入 `context_router.py`**
 
 在 `discover_context_paths()` 开头尝试 Graph Recall：
 
@@ -1077,7 +1077,7 @@ class GraphRecallResult:
 - Graph stale：旧 markdown index 命中必须作为强候选参与排序
 - 最终仍返回 path list，兼容现有调用方
 
-- [ ] **步骤 5：运行测试**
+- [x] **步骤 5：运行测试**
 
 运行：
 
