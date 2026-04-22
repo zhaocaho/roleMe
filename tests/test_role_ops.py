@@ -1,6 +1,8 @@
+from datetime import datetime
 from pathlib import Path
 import pytest
 import re
+import shutil
 
 import tools.role_ops as role_ops
 from tools.context_router import discover_context_paths
@@ -57,6 +59,29 @@ def test_initialize_role_creates_graph_schema(tmp_role_home):
     assert 'graph_schema_version: "1.0"' in schema_text
     assert "node_types:" in schema_text
     assert "edge_types:" in schema_text
+
+
+def test_initialize_role_creates_memory_lifecycle_indexes(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+
+    assert (role_path / "memory" / "inbox" / "index.md").exists()
+    assert (role_path / "memory" / "learnings" / "index.md").exists()
+    assert "# Inbox" in (role_path / "memory" / "inbox" / "index.md").read_text(
+        encoding="utf-8"
+    )
+    assert "# Learnings" in (
+        role_path / "memory" / "learnings" / "index.md"
+    ).read_text(encoding="utf-8")
+
+
+def test_initialize_role_graph_schema_supports_p1_node_types(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    schema_text = (role_path / "brain" / "graph" / "schema.yaml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "  - MemoryCandidate" in schema_text
+    assert "  - Learning" in schema_text
 
 
 def test_load_role_bundle_returns_persona_resident_and_on_demand_paths(tmp_role_home):
@@ -347,6 +372,112 @@ def test_doctor_role_includes_graph_warnings(tmp_role_home):
 
     assert "orphan edge source: edge-orphan -> missing-source" in report.warnings
     assert "orphan edge target: edge-orphan -> missing-target" in report.warnings
+
+
+def test_doctor_warns_for_missing_optional_lifecycle_structure(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    shutil.rmtree(role_path / "memory" / "inbox")
+
+    report = doctor_role(
+        "self", now=datetime.fromisoformat("2026-04-22T12:00:00+08:00")
+    )
+
+    assert "memory/inbox/index.md" not in report.missing_files
+    assert any(
+        "optional_structure_missing: memory/inbox/index.md" in warning
+        for warning in report.warnings
+    )
+
+
+def test_doctor_reports_lifecycle_index_missing_target(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    (role_path / "memory" / "inbox" / "index.md").write_text(
+        "# Inbox\n\n## pending\n"
+        "- inbox-20260422-404: Missing -> memory/inbox/inbox-20260422-404.md\n\n"
+        "## promoted\n\n## closed\n",
+        encoding="utf-8",
+    )
+
+    report = doctor_role("self")
+
+    assert any(
+        "memory/inbox/index.md points to missing file: "
+        "memory/inbox/inbox-20260422-404.md" in warning
+        for warning in report.warnings
+    )
+
+
+def test_doctor_reports_stale_pending_inbox_and_learning(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    (role_path / "memory" / "inbox" / "inbox-20260401-001.md").write_text(
+        "# Old Inbox\n\n"
+        "- id: inbox-20260401-001\n"
+        "- status: pending\n"
+        "- source: user_statement\n"
+        "- recurrence: 1\n"
+        "- created_at: 2026-04-01T10:00:00+08:00\n"
+        "- last_seen_at: 2026-04-01T10:00:00+08:00\n"
+        "- suggested_target: user\n"
+        "- confidence: medium\n\n"
+        "## Summary\n\nold\n\n## Evidence\n\nold\n\n## Promotion Notes\n\nold\n",
+        encoding="utf-8",
+    )
+    (role_path / "memory" / "learnings" / "learning-20260301-001.md").write_text(
+        "# Old Learning\n\n"
+        "- id: learning-20260301-001\n"
+        "- type: correction\n"
+        "- status: pending\n"
+        "- recurrence: 1\n"
+        "- priority: normal\n"
+        "- created_at: 2026-03-01T10:00:00+08:00\n"
+        "- last_seen_at: 2026-03-01T10:00:00+08:00\n"
+        "- applies_to: global\n\n"
+        "## Rule Candidate\n\nold\n\n## How To Apply\n\nold\n\n"
+        "## Evidence\n\nold\n\n## Promotion Target\n\nmemory/USER.md\n",
+        encoding="utf-8",
+    )
+
+    report = doctor_role(
+        "self", now=datetime.fromisoformat("2026-04-22T12:00:00+08:00")
+    )
+
+    assert any(
+        "pending inbox older than 14 days: memory/inbox/inbox-20260401-001.md"
+        in warning
+        for warning in report.warnings
+    )
+    assert any(
+        "pending learning older than 30 days: "
+        "memory/learnings/learning-20260301-001.md" in warning
+        for warning in report.warnings
+    )
+
+
+def test_doctor_reports_naive_pending_timestamp_as_invalid(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    (role_path / "memory" / "inbox" / "inbox-20260401-001.md").write_text(
+        "# Old Inbox\n\n"
+        "- id: inbox-20260401-001\n"
+        "- status: pending\n"
+        "- source: user_statement\n"
+        "- recurrence: 1\n"
+        "- created_at: 2026-04-01T10:00:00\n"
+        "- last_seen_at: 2026-04-01T10:00:00\n"
+        "- suggested_target: user\n"
+        "- confidence: medium\n\n"
+        "## Summary\n\nold\n\n## Evidence\n\nold\n\n## Promotion Notes\n\nold\n",
+        encoding="utf-8",
+    )
+
+    report = doctor_role(
+        "self", now=datetime.fromisoformat("2026-04-22T12:00:00+08:00")
+    )
+
+    assert any(
+        "inbox missing or invalid last_seen_at: memory/inbox/inbox-20260401-001.md"
+        in warning
+        for warning in report.warnings
+    )
 
 
 def test_doctor_role_reports_corrupt_graph_jsonl_as_warning(tmp_role_home):

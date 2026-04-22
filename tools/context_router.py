@@ -33,6 +33,29 @@ DOMAIN_HINTS = {
     "领域",
     "知识",
 }
+SESSION_RECALL_HINTS = {
+    "回顾",
+    "继续",
+    "最近",
+    "上次",
+    "复盘",
+    "经验教训",
+    "提升",
+    "recap",
+    "continue",
+    "previous",
+    "recent",
+    "retro",
+    "promote",
+}
+INTERNAL_SKILL_REQUIRED_SECTIONS = [
+    "Purpose",
+    "When To Use",
+    "Inputs",
+    "Procedure",
+    "Outputs",
+    "Boundaries",
+]
 PATH_PATTERN = re.compile(r"([A-Za-z0-9_./-]+\.md)")
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]+")
 CJK_RUN_PATTERN = re.compile(r"[\u4e00-\u9fff]+")
@@ -47,6 +70,11 @@ class ContextRoute:
 
 def _tokenize(text: str) -> set[str]:
     return {match.group(0).casefold() for match in TOKEN_PATTERN.finditer(text)}
+
+
+def is_session_recall_query(query: str) -> bool:
+    normalized = query.casefold()
+    return any(hint in normalized for hint in SESSION_RECALL_HINTS)
 
 
 def _extract_markdown_paths(text: str) -> list[str]:
@@ -329,6 +357,60 @@ def _discover_global_workflow_paths(role_path: Path, query: str) -> list[str]:
     return discovered
 
 
+def _read_internal_skill_entries(index_path: Path) -> list[WorkflowIndexEntry]:
+    if not index_path.exists() or not index_path.is_file():
+        return []
+    try:
+        return parse_workflow_index(index_path.read_text(encoding="utf-8"))
+    except ValueError:
+        return []
+
+
+def _discover_internal_skill_paths(role_path: Path, query: str) -> list[str]:
+    index_relative = "skills/index.md"
+    index_path = role_path / index_relative
+    entries = _read_internal_skill_entries(index_path)
+    selected = _select_workflow_entry(query, entries)
+    if selected is None:
+        return []
+    skill_relative = f"skills/{selected.file}"
+    skill_path = role_path / skill_relative
+    if not _is_nonempty_file(skill_path):
+        return []
+    text = skill_path.read_text(encoding="utf-8")
+    if any(f"## {section}" not in text for section in INTERNAL_SKILL_REQUIRED_SECTIONS):
+        return []
+    return [index_relative, skill_relative]
+
+
+def _discover_session_paths(role_path: Path, query: str) -> list[str]:
+    if not is_session_recall_query(query):
+        return []
+    index_relative = "memory/sessions/index.md"
+    index_path = role_path / index_relative
+    if not index_path.exists():
+        return []
+    query_tokens = _tokenize(query)
+    text = index_path.read_text(encoding="utf-8")
+    blocks = re.split(r"(?=^## )", text, flags=re.MULTILINE)
+    candidates: list[tuple[int, str]] = []
+    for block in blocks:
+        file_match = re.search(r"^- file: (.*)$", block, flags=re.MULTILINE)
+        if not file_match:
+            continue
+        file_name = file_match.group(1).strip()
+        score = _score_text(query_tokens, block)
+        if score > 0:
+            candidates.append((score, file_name))
+    if not candidates:
+        return [index_relative]
+    candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    selected_relative = f"memory/sessions/{candidates[0][1]}"
+    if (role_path / selected_relative).exists():
+        return [index_relative, selected_relative]
+    return [index_relative]
+
+
 def discover_workflow_paths(role_path: Path, query: str) -> list[str]:
     project_slug = _resolve_current_project_slug(role_path, query)
     if project_slug:
@@ -424,6 +506,10 @@ def _discover_graph_context_paths(role_path: Path, query: str) -> list[str]:
 
 
 def discover_context_paths(role_path: Path, query: str, max_brain_depth: int = 1) -> list[str]:
+    session_paths = _discover_session_paths(role_path, query)
+    if session_paths:
+        return session_paths
+
     graph_paths = _discover_graph_context_paths(role_path, query)
     if graph_paths:
         return graph_paths
@@ -431,6 +517,10 @@ def discover_context_paths(role_path: Path, query: str, max_brain_depth: int = 1
     workflow_paths = discover_workflow_paths(role_path, query)
     if workflow_paths:
         return workflow_paths
+
+    internal_skill_paths = _discover_internal_skill_paths(role_path, query)
+    if internal_skill_paths:
+        return internal_skill_paths
 
     route = route_context_lookup(role_path, query)
     discovered: list[str] = []

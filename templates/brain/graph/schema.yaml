@@ -6,11 +6,15 @@ node_types:
   - Preference
   - Principle
   - Memory
+  - MemoryCandidate
+  - Learning
   - Episode
+  - Session
   - Decision
   - Evidence
   - Concept
   - Topic
+  - Skill
   - File
 edge_types:
   - belongs_to

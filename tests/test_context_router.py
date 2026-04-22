@@ -3,6 +3,7 @@ from tools.context_router import (
     discover_brain_paths,
     discover_context_paths,
     discover_project_paths,
+    is_session_recall_query,
     route_context_lookup,
 )
 from tools.graph_index import NodeRecord, save_graph
@@ -557,6 +558,122 @@ def test_discover_context_paths_filters_inactive_graph_nodes(tmp_role_home):
     result = discover_context_paths(role_path, query="旧流程")
 
     assert "brain/workflows/old.md" not in result
+
+
+def test_is_session_recall_query_accepts_review_and_continuation_intents():
+    assert is_session_recall_query("继续上次的 roleMe 设计")
+    assert is_session_recall_query("回顾今天做了什么")
+    assert is_session_recall_query("复盘这轮工作")
+    assert is_session_recall_query("看看最近有什么 learning 可以提升")
+
+
+def test_is_session_recall_query_rejects_normal_task_intents():
+    assert not is_session_recall_query("开始实现 inbox")
+    assert not is_session_recall_query("帮我写 PRD")
+    assert not is_session_recall_query("review 这份代码")
+    assert not is_session_recall_query("新增一个 workflow")
+
+
+def test_discover_context_paths_uses_internal_skill_when_workflow_missing(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    skills_dir = role_path / "skills"
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    (skills_dir / "index.md").write_text(
+        "# Internal Skills\n\n"
+        "## code-review\n"
+        "- title: 代码评审能力\n"
+        "- file: code-review.md\n"
+        "- applies_to: 当用户要求 review、审查代码、找风险时使用\n"
+        "- keywords: review, 代码评审, 风险\n"
+        "- summary: 按风险优先级输出代码审查意见\n",
+        encoding="utf-8",
+    )
+    (skills_dir / "code-review.md").write_text(
+        "# 代码评审能力\n\n"
+        "## Purpose\n\nFind risks.\n\n"
+        "## When To Use\n\nReview requests.\n\n"
+        "## Inputs\n\nDiff.\n\n"
+        "## Procedure\n\nInspect risks.\n\n"
+        "## Outputs\n\nFindings.\n\n"
+        "## Boundaries\n\nNo unrelated rewrites.\n",
+        encoding="utf-8",
+    )
+
+    result = discover_context_paths(role_path, query="帮我 review 这份代码")
+
+    assert result == ["skills/index.md", "skills/code-review.md"]
+
+
+def test_discover_context_paths_prefers_workflow_over_internal_skill(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    workflows_dir = role_path / "brain" / "workflows"
+    workflows_dir.mkdir(parents=True, exist_ok=True)
+    (workflows_dir / "index.md").write_text(
+        "# 工作流索引\n\n"
+        "## code-review\n"
+        "- title: 代码评审 workflow\n"
+        "- file: code-review.md\n"
+        "- applies_to: 当用户要求 review、审查代码、找风险时使用\n"
+        "- keywords: review, 代码评审, 风险\n"
+        "- summary: 按流程审查代码\n",
+        encoding="utf-8",
+    )
+    (workflows_dir / "code-review.md").write_text(
+        "# 代码评审 workflow\n\n先看风险。\n", encoding="utf-8"
+    )
+    skills_dir = role_path / "skills"
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    (skills_dir / "index.md").write_text(
+        "# Internal Skills\n\n"
+        "## code-review\n"
+        "- title: 代码评审能力\n"
+        "- file: code-review.md\n"
+        "- applies_to: 当用户要求 review、审查代码、找风险时使用\n"
+        "- keywords: review, 代码评审, 风险\n"
+        "- summary: 按风险优先级输出代码审查意见\n",
+        encoding="utf-8",
+    )
+    (skills_dir / "code-review.md").write_text(
+        "# 代码评审能力\n\n## Purpose\n\nFind risks.\n", encoding="utf-8"
+    )
+
+    result = discover_context_paths(role_path, query="帮我 review 这份代码")
+
+    assert result == [
+        "brain/index.md",
+        "brain/workflows/index.md",
+        "brain/workflows/code-review.md",
+    ]
+
+
+def test_discover_context_paths_loads_session_only_for_session_recall(tmp_role_home):
+    role_path = initialize_role("self", skill_version="0.1.0")
+    sessions_dir = role_path / "memory" / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    (sessions_dir / "index.md").write_text(
+        "# Sessions\n\n"
+        "## 2026-04-22-001\n"
+        "- file: 2026-04-22-001.md\n"
+        "- summary: 讨论 roleMe inbox 和 learning 设计\n"
+        "- keywords: roleMe, inbox, learning\n"
+        "- inbox_candidates: 1\n"
+        "- learning_candidates: 1\n"
+        "- promotions: 0\n",
+        encoding="utf-8",
+    )
+    (sessions_dir / "2026-04-22-001.md").write_text(
+        "# Session Summary - 2026-04-22-001\n\n讨论 roleMe inbox 和 learning 设计。\n",
+        encoding="utf-8",
+    )
+
+    recall_result = discover_context_paths(role_path, query="继续上次的 roleMe inbox 设计")
+    normal_result = discover_context_paths(role_path, query="开始实现 roleMe inbox")
+
+    assert recall_result == [
+        "memory/sessions/index.md",
+        "memory/sessions/2026-04-22-001.md",
+    ]
+    assert "memory/sessions/index.md" not in normal_result
 
 
 def test_discover_context_paths_does_not_add_weak_graph_candidates_by_default(tmp_role_home):

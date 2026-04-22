@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 from pathlib import Path
 import json
@@ -59,6 +59,20 @@ REQUIRED_FILES = [
     "persona/communication-style.md",
     "persona/decision-rules.md",
     "persona/disclosure-layers.md",
+]
+OPTIONAL_INDEXES = [
+    "memory/inbox/index.md",
+    "memory/learnings/index.md",
+    "skills/index.md",
+    "memory/sessions/index.md",
+]
+INTERNAL_SKILL_REQUIRED_SECTIONS = [
+    "Purpose",
+    "When To Use",
+    "Inputs",
+    "Procedure",
+    "Outputs",
+    "Boundaries",
 ]
 
 
@@ -1823,11 +1837,28 @@ def initialize_role(role_name: str, skill_version: str) -> Path:
     for relative_dir in [
         "brain/graph/indexes",
         "brain/topics",
+        "memory/inbox",
+        "memory/learnings",
         "memory/episodes",
+        "memory/sessions",
         "projects",
         "persona",
+        "skills",
     ]:
         (destination / relative_dir).mkdir(parents=True, exist_ok=True)
+
+    optional_indexes = {
+        destination / "memory" / "inbox" / "index.md": (
+            "# Inbox\n\n## pending\n\n## promoted\n\n## closed\n"
+        ),
+        destination / "memory" / "learnings" / "index.md": (
+            "# Learnings\n\n## pending\n\n## promoted\n\n## closed\n"
+        ),
+        destination / "skills" / "index.md": "# Internal Skills\n",
+        destination / "memory" / "sessions" / "index.md": "# Sessions\n",
+    }
+    for path, content in optional_indexes.items():
+        _write_if_missing(path, content)
 
     for relative_file in [
         "AGENT.md",
@@ -2079,7 +2110,89 @@ def export_role(role_name: str, output_dir: Path, as_zip: bool = True) -> Path:
     return destination
 
 
-def doctor_role(role_name: str) -> DoctorReport:
+def _extract_index_targets(text: str, base_directory: str = "") -> list[str]:
+    targets: list[str] = []
+    for match in re.finditer(r"->\s*([A-Za-z0-9_./-]+\.md)", text):
+        target = match.group(1).replace("\\", "/").lstrip("./")
+        if target not in targets:
+            targets.append(target)
+    for match in re.finditer(r"^- file:\s*([A-Za-z0-9_./-]+\.md)$", text, re.MULTILINE):
+        target = match.group(1).replace("\\", "/").lstrip("./")
+        if "/" not in target and base_directory:
+            target = f"{base_directory.rstrip('/')}/{target}"
+        if target not in targets:
+            targets.append(target)
+    return targets
+
+
+def _parse_iso_datetime(value: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def _markdown_field(text: str, field: str) -> str:
+    match = re.search(rf"^- {re.escape(field)}: (.*)$", text, re.MULTILINE)
+    return match.group(1).strip() if match else ""
+
+
+def _warn_optional_index(role_path: Path, relative: str, warnings: list[str]) -> None:
+    path = role_path / relative
+    if not path.exists():
+        warnings.append(f"optional_structure_missing: {relative}")
+        return
+    text = path.read_text(encoding="utf-8")
+    base_directory = str(Path(relative).parent).replace("\\", "/")
+    for target in _extract_index_targets(text, base_directory):
+        if not (role_path / target).exists():
+            warnings.append(f"{relative} points to missing file: {target}")
+
+
+def _warn_stale_pending(
+    role_path: Path,
+    directory: str,
+    label: str,
+    max_age_days: int,
+    warnings: list[str],
+    now: datetime,
+) -> None:
+    for path in sorted((role_path / directory).glob("*.md")):
+        if path.name == "index.md":
+            continue
+        text = path.read_text(encoding="utf-8")
+        if _markdown_field(text, "status") != "pending":
+            continue
+        last_seen = _parse_iso_datetime(_markdown_field(text, "last_seen_at"))
+        if last_seen is None:
+            warnings.append(
+                f"{label} missing or invalid last_seen_at: {path.relative_to(role_path)}"
+            )
+            continue
+        if now - last_seen > timedelta(days=max_age_days):
+            warnings.append(
+                f"pending {label} older than {max_age_days} days: "
+                f"{path.relative_to(role_path)}"
+            )
+
+
+def _warn_internal_skill_sections(role_path: Path, warnings: list[str]) -> None:
+    skills_dir = role_path / "skills"
+    if not skills_dir.exists():
+        return
+    for path in sorted(skills_dir.glob("*.md")):
+        if path.name == "index.md":
+            continue
+        text = path.read_text(encoding="utf-8")
+        for section in INTERNAL_SKILL_REQUIRED_SECTIONS:
+            if f"## {section}" not in text:
+                warnings.append(
+                    f"{path.relative_to(role_path)} missing required section: {section}"
+                )
+
+
+def doctor_role(role_name: str, now: datetime | None = None) -> DoctorReport:
     role_name = normalize_role_name(role_name)
     base_path = role_dir(role_name)
     missing = [relative for relative in REQUIRED_FILES if not (base_path / relative).exists()]
@@ -2089,6 +2202,16 @@ def doctor_role(role_name: str) -> DoctorReport:
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
         if payload.get("schemaVersion") != SCHEMA_VERSION:
             warnings.append(f"schema mismatch: {payload.get('schemaVersion')}")
+    for relative in OPTIONAL_INDEXES:
+        _warn_optional_index(base_path, relative, warnings)
+    _warn_internal_skill_sections(base_path, warnings)
+    effective_now = now or datetime.now(timezone.utc).astimezone()
+    if (base_path / "memory" / "inbox").exists():
+        _warn_stale_pending(base_path, "memory/inbox", "inbox", 14, warnings, effective_now)
+    if (base_path / "memory" / "learnings").exists():
+        _warn_stale_pending(
+            base_path, "memory/learnings", "learning", 30, warnings, effective_now
+        )
     graph_report = doctor_graph(base_path)
     warnings.extend(graph_report.warnings)
     return DoctorReport(missing_files=missing, warnings=warnings)
