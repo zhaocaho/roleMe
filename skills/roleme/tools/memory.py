@@ -6,20 +6,38 @@ import os
 from pathlib import Path
 import re
 
-from tools.file_ops import atomic_write_text
-from tools.graph_index import (
-    EdgeRecord,
-    NodeRecord,
-    deterministic_edge_id,
-    deterministic_node_id,
-    doctor_graph,
-    load_graph,
-    rebuild_indexes,
-    save_graph,
-    upsert_edge,
-    upsert_node,
-)
-from tools.workflow_index import WorkflowIndexEntry, parse_workflow_index
+try:
+    from tools.file_ops import atomic_write_text
+    from tools.graph_index import (
+        EdgeRecord,
+        NodeRecord,
+        deterministic_edge_id,
+        deterministic_node_id,
+        doctor_graph,
+        load_graph,
+        rebuild_indexes,
+        save_graph,
+        upsert_edge,
+        upsert_node,
+    )
+    from tools.workflow_index import WorkflowIndexEntry, parse_workflow_index
+except ModuleNotFoundError as exc:
+    if exc.name != "tools":
+        raise
+    from file_ops import atomic_write_text
+    from graph_index import (
+        EdgeRecord,
+        NodeRecord,
+        deterministic_edge_id,
+        deterministic_node_id,
+        doctor_graph,
+        load_graph,
+        rebuild_indexes,
+        save_graph,
+        upsert_edge,
+        upsert_node,
+    )
+    from workflow_index import WorkflowIndexEntry, parse_workflow_index
 
 
 ENTRY_START = "<!-- ROLEME:ENTRIES:START -->"

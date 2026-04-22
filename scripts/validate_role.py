@@ -20,8 +20,13 @@ def validate_role(role_name: str) -> None:
     print(f"ok: {role_name}")
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument("role_name")
-args = parser.parse_args()
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("role_name")
+    args = parser.parse_args()
 
-validate_role(args.role_name)
+    validate_role(args.role_name)
+
+
+if __name__ == "__main__":
+    main()

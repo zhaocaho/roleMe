@@ -10,26 +10,50 @@ import re
 import shutil
 import tempfile
 
-from tools.context_router import build_context_snapshot, discover_context_paths
-from tools.file_ops import atomic_write_json, atomic_write_text
-from tools.graph_index import (
-    EdgeRecord,
-    NodeRecord,
-    deterministic_edge_id,
-    deterministic_node_id,
-    doctor_graph,
-    load_graph,
-    rebuild_indexes,
-    save_graph,
-    upsert_edge,
-    upsert_node,
-)
-from tools.memory import build_frozen_snapshot, write_memory
-from tools.workflow_index import (
-    WorkflowIndexEntry,
-    normalize_workflow_slug,
-    upsert_workflow_index_entry,
-)
+try:
+    from tools.context_router import build_context_snapshot, discover_context_paths
+    from tools.file_ops import atomic_write_json, atomic_write_text
+    from tools.graph_index import (
+        EdgeRecord,
+        NodeRecord,
+        deterministic_edge_id,
+        deterministic_node_id,
+        doctor_graph,
+        load_graph,
+        rebuild_indexes,
+        save_graph,
+        upsert_edge,
+        upsert_node,
+    )
+    from tools.memory import build_frozen_snapshot, write_memory
+    from tools.workflow_index import (
+        WorkflowIndexEntry,
+        normalize_workflow_slug,
+        upsert_workflow_index_entry,
+    )
+except ModuleNotFoundError as exc:
+    if exc.name != "tools":
+        raise
+    from context_router import build_context_snapshot, discover_context_paths
+    from file_ops import atomic_write_json, atomic_write_text
+    from graph_index import (
+        EdgeRecord,
+        NodeRecord,
+        deterministic_edge_id,
+        deterministic_node_id,
+        doctor_graph,
+        load_graph,
+        rebuild_indexes,
+        save_graph,
+        upsert_edge,
+        upsert_node,
+    )
+    from memory import build_frozen_snapshot, write_memory
+    from workflow_index import (
+        WorkflowIndexEntry,
+        normalize_workflow_slug,
+        upsert_workflow_index_entry,
+    )
 
 
 SCHEMA_VERSION = "1.0"

@@ -31,10 +31,15 @@ def upgrade_role(role_name: str, target_schema: str) -> None:
     bootstrap_graph(role_path)
 
 
-parser = argparse.ArgumentParser()
-parser.add_argument("role_name")
-parser.add_argument("--target-schema", default="1.0")
-args = parser.parse_args()
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("role_name")
+    parser.add_argument("--target-schema", default="1.0")
+    args = parser.parse_args()
 
-upgrade_role(args.role_name, args.target_schema)
-print(f"upgraded {args.role_name} to schema {args.target_schema}")
+    upgrade_role(args.role_name, args.target_schema)
+    print(f"upgraded {args.role_name} to schema {args.target_schema}")
+
+
+if __name__ == "__main__":
+    main()

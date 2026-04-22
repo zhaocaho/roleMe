@@ -4,9 +4,16 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 
-from tools.graph_index import ContextCandidate, recall_graph
-from tools.memory import build_frozen_snapshot
-from tools.workflow_index import WorkflowIndexEntry, parse_workflow_index
+try:
+    from tools.graph_index import ContextCandidate, recall_graph
+    from tools.memory import build_frozen_snapshot
+    from tools.workflow_index import WorkflowIndexEntry, parse_workflow_index
+except ModuleNotFoundError as exc:
+    if exc.name != "tools":
+        raise
+    from graph_index import ContextCandidate, recall_graph
+    from memory import build_frozen_snapshot
+    from workflow_index import WorkflowIndexEntry, parse_workflow_index
 
 
 PROJECT_HINTS = {

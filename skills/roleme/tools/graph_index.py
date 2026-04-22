@@ -8,8 +8,14 @@ from pathlib import Path
 import re
 from typing import Any
 
-from tools.file_ops import atomic_rewrite_jsonl, atomic_write_json
-from tools.workflow_index import parse_workflow_index
+try:
+    from tools.file_ops import atomic_rewrite_jsonl, atomic_write_json
+    from tools.workflow_index import parse_workflow_index
+except ModuleNotFoundError as exc:
+    if exc.name != "tools":
+        raise
+    from file_ops import atomic_rewrite_jsonl, atomic_write_json
+    from workflow_index import parse_workflow_index
 
 
 GRAPH_DIR = Path("brain") / "graph"

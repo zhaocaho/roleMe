@@ -831,7 +831,7 @@ def test_build_skill_includes_workflows_index_guidance(tmp_path):
 - [ ] **Step 3: 重建打包产物**
 
 Run: `python3 scripts/build_skill.py`
-Expected: 输出 `/Users/zhaochao/code/project/roleMe/skills/roleme`，并刷新 `skills/roleme/` 下的文档与工具文件。
+Expected: 输出 `<repo-root>/skills/roleme`，并刷新 `skills/roleme/` 下的文档与工具文件。
 
 - [ ] **Step 4: 运行打包脚本测试，确认发布产物与 bundle 文档同步**
 

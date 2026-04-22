@@ -1,5 +1,6 @@
 from scripts.build_skill import build_skill, publish_skill
 from pathlib import Path
+import importlib
 import runpy
 import subprocess
 import sys
@@ -117,6 +118,16 @@ def test_validate_role_script_imports_tools_when_run_by_path(tmp_role_home, tmp_
     assert "ModuleNotFoundError" not in result.stderr
     assert result.returncode == 0
     assert "ok: self" in result.stdout
+
+
+def test_repo_cli_scripts_are_importable_without_parsing_argv(monkeypatch):
+    monkeypatch.setattr("sys.argv", ["pytest"])
+
+    validate_role = importlib.import_module("scripts.validate_role")
+    upgrade_role = importlib.import_module("scripts.upgrade_role")
+
+    assert callable(validate_role.validate_role)
+    assert callable(upgrade_role.upgrade_role)
 
 
 def test_build_skill_ignores_python_cache_files(tmp_path, monkeypatch):

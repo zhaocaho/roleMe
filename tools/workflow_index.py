@@ -4,7 +4,12 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 
-from tools.file_ops import atomic_write_text
+try:
+    from tools.file_ops import atomic_write_text
+except ModuleNotFoundError as exc:
+    if exc.name != "tools":
+        raise
+    from file_ops import atomic_write_text
 
 
 @dataclass(frozen=True)
