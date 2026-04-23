@@ -95,3 +95,29 @@ def test_python_files_do_not_contain_local_machine_paths():
                 offenders.append(str(path))
 
     assert offenders == []
+
+
+def test_published_role_ops_initializes_role_from_assets_templates(tmp_path):
+    role_home = tmp_path / ".roleMe"
+    role_home.mkdir()
+
+    code = (
+        "from role_ops import initialize_role; "
+        "path = initialize_role('portable', skill_version='0.1.0'); "
+        "print(path)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        check=False,
+        cwd=tmp_path,
+        env={
+            "PYTHONPATH": str(Path.cwd() / "skills" / "roleme" / "tools"),
+            "ROLEME_HOME": str(role_home),
+        },
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (role_home / "portable" / "AGENT.md").exists()
+    assert (role_home / "portable" / "persona" / "narrative.md").exists()

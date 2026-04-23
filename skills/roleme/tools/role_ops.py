@@ -349,7 +349,11 @@ def repo_root() -> Path:
 
 
 def templates_dir() -> Path:
-    return repo_root() / "templates"
+    root = repo_root()
+    source_templates = root / "templates"
+    if source_templates.exists():
+        return source_templates
+    return root / "assets" / "templates"
 
 
 def roleme_home() -> Path:
