@@ -8,7 +8,6 @@ import json
 import os
 import re
 import shutil
-import tempfile
 
 try:
     from tools.context_router import build_context_snapshot, discover_context_paths
@@ -154,13 +153,6 @@ class QueryContextBundle:
     resident_files: dict[str, str]
     discovered_paths: list[str]
     context_snapshot: str
-
-
-@dataclass(frozen=True)
-class CurrentRoleState:
-    role_name: str
-    role_path: str
-    loaded_at: str
 
 
 @dataclass(frozen=True)
@@ -368,18 +360,6 @@ def _directory_writable(path: Path) -> bool:
     return os.access(target, os.W_OK | os.X_OK)
 
 
-def roleme_state_home() -> Path:
-    override = os.environ.get("ROLEME_STATE_HOME")
-    if override:
-        return Path(override).expanduser()
-
-    home = roleme_home()
-    if _directory_writable(home):
-        return home
-
-    return Path(tempfile.gettempdir()) / "roleMe-state"
-
-
 def normalize_role_name(role_name: str) -> str:
     normalized = role_name.strip()
     if not normalized:
@@ -393,63 +373,6 @@ def normalize_role_name(role_name: str) -> str:
 
 def role_dir(role_name: str) -> Path:
     return roleme_home() / normalize_role_name(role_name)
-
-
-def current_role_state_paths() -> list[Path]:
-    preferred = roleme_state_home() / ".current-role.json"
-    legacy = roleme_home() / ".current-role.json"
-    return [preferred] if preferred == legacy else [preferred, legacy]
-
-
-def current_role_state_path() -> Path:
-    return current_role_state_paths()[0]
-
-
-def set_current_role_state(role_name: str) -> CurrentRoleState:
-    role_name = normalize_role_name(role_name)
-    base_path = role_dir(role_name)
-    if not base_path.exists():
-        raise FileNotFoundError(f"Role does not exist: {base_path}")
-
-    state = CurrentRoleState(
-        role_name=role_name,
-        role_path=str(base_path),
-        loaded_at=datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"),
-    )
-    payload = {
-        "roleName": state.role_name,
-        "rolePath": state.role_path,
-        "loadedAt": state.loaded_at,
-    }
-    state_path = current_role_state_path()
-    atomic_write_json(state_path, payload)
-    return state
-
-
-def get_current_role_state() -> CurrentRoleState:
-    invalid_pointer_found = False
-    for path in current_role_state_paths():
-        if not path.exists():
-            continue
-
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        role_name = normalize_role_name(str(payload.get("roleName", "")).strip())
-        role_path = Path(str(payload.get("rolePath", "")).strip())
-        loaded_at = str(payload.get("loadedAt", "")).strip()
-        expected_path = role_dir(role_name)
-        if role_path != expected_path or not expected_path.exists() or not loaded_at:
-            invalid_pointer_found = True
-            continue
-
-        return CurrentRoleState(
-            role_name=role_name,
-            role_path=str(expected_path),
-            loaded_at=loaded_at,
-        )
-
-    if invalid_pointer_found:
-        raise ValueError("Current role pointer is invalid.")
-    raise FileNotFoundError("No current role is loaded.")
 
 
 def build_default_role_entry_prompt(user_language: str = "中文") -> RoleEntryPrompt:
@@ -696,6 +619,28 @@ def sanitize_archived_markdown(content: str, minimum_chars: int = 12) -> str:
 def sanitize_archive_entry(content: str, minimum_chars: int = 4) -> str:
     normalized = content.strip().strip("-").strip()
     return _sanitize_archive_text(normalized, minimum_chars=minimum_chars)
+
+
+def _resolve_archive_role_name(
+    explicit_role_name: str | None,
+    plan_role_name: str | None,
+) -> str:
+    normalized_explicit = (
+        normalize_role_name(explicit_role_name) if explicit_role_name else ""
+    )
+    normalized_plan = normalize_role_name(plan_role_name) if plan_role_name else ""
+
+    if (
+        normalized_explicit
+        and normalized_plan
+        and normalized_explicit != normalized_plan
+    ):
+        raise ValueError("Workflow archive role_name conflicts with plan.role_name.")
+
+    resolved = normalized_explicit or normalized_plan
+    if not resolved:
+        raise ValueError("Workflow archive requires role_name.")
+    return resolved
 
 
 def summarize_index_entry(summary: str) -> str:
@@ -1205,12 +1150,14 @@ def archive_decision(
     )
 
 
-def archive_general_workflow(plan: WorkflowArchivePlan) -> WorkflowArchiveResult:
-    current = get_current_role_state()
-    if plan.role_name and plan.role_name != current.role_name:
-        raise ValueError("Workflow archive role does not match the current role.")
-
-    role_path = Path(current.role_path)
+def archive_general_workflow(
+    plan: WorkflowArchivePlan,
+    role_name: str | None = None,
+) -> WorkflowArchiveResult:
+    resolved_role = _resolve_archive_role_name(role_name, plan.role_name)
+    role_path = role_dir(resolved_role)
+    if not role_path.exists():
+        raise FileNotFoundError(f"Role does not exist: {role_path}")
     workflow_doc = sanitize_archived_markdown(plan.workflow_doc_markdown)
     workflows_dir = role_path / "brain" / "workflows"
     workflows_dir.mkdir(parents=True, exist_ok=True)
@@ -1245,7 +1192,7 @@ def archive_general_workflow(plan: WorkflowArchivePlan) -> WorkflowArchiveResult
         scope="global",
     )
     return WorkflowArchiveResult(
-        role_name=current.role_name,
+        role_name=resolved_role,
         project_title=None,
         project_slug=None,
         written_paths=[
@@ -1262,14 +1209,17 @@ def archive_general_workflow(plan: WorkflowArchivePlan) -> WorkflowArchiveResult
     )
 
 
-def archive_project_workflow(plan: WorkflowArchivePlan) -> WorkflowArchiveResult:
-    current = get_current_role_state()
-    if plan.role_name and plan.role_name != current.role_name:
-        raise ValueError("Workflow archive role does not match the current role.")
+def archive_project_workflow(
+    plan: WorkflowArchivePlan,
+    role_name: str | None = None,
+) -> WorkflowArchiveResult:
+    resolved_role = _resolve_archive_role_name(role_name, plan.role_name)
     if not plan.project_title or not plan.project_slug:
         raise ValueError("Project workflow archive requires project title and slug.")
 
-    role_path = Path(current.role_path)
+    role_path = role_dir(resolved_role)
+    if not role_path.exists():
+        raise FileNotFoundError(f"Role does not exist: {role_path}")
     project_dir = role_path / "projects" / plan.project_slug
     project_dir.mkdir(parents=True, exist_ok=True)
     workflows_dir = project_dir / "workflows"
@@ -1311,7 +1261,7 @@ def archive_project_workflow(plan: WorkflowArchivePlan) -> WorkflowArchiveResult
         scope="project",
     )
     return WorkflowArchiveResult(
-        role_name=current.role_name,
+        role_name=resolved_role,
         project_title=plan.project_title,
         project_slug=plan.project_slug,
         written_paths=[
@@ -2067,7 +2017,6 @@ def load_role_bundle(role_name: str) -> RoleBundle:
         relative: (base_path / relative).read_text(encoding="utf-8")
         for relative in RESIDENT_PATHS
     }
-    set_current_role_state(role_name)
     maybe_bootstrap_project_from_cwd(base_path)
     context_snapshot = build_frozen_snapshot(base_path)
     return RoleBundle(
@@ -2091,7 +2040,6 @@ def load_query_context_bundle(
         relative: (base_path / relative).read_text(encoding="utf-8")
         for relative in RESIDENT_PATHS
     }
-    set_current_role_state(role_name)
     maybe_bootstrap_project_from_cwd(base_path)
     discovered_paths = discover_context_paths(
         base_path,
