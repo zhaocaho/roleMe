@@ -10,7 +10,7 @@
 
 角色包不保存在 skill 安装目录里。不要检查 `~/.agents/skills/roleme/roles/` 这类路径；列举角色或判断角色是否存在时，应以 `tools/role_ops.py` 的 `list_roles()` / `role_dir()` 语义为准。
 
-当前角色指针默认写入 `ROLEME_HOME/.current-role.json`。如果角色目录所在位置只读，可用 `ROLEME_STATE_HOME` 指定一个可写状态目录；未配置时，运行时会退回系统临时目录下的 `roleMe-state/`。
+当前角色由当前会话最近一次成功加载的角色决定；`.current-role.json` 不再作为当前角色来源。
 
 加载角色以后，不是让模型变成这个角色，而是让你在当前对话里以这个角色的身份被理解。助手仍然是助手，但会优先通过这个角色的身份、记忆、知识和项目上下文来理解你。
 
@@ -47,7 +47,12 @@
 
 ```text
 /roleMe list
-/roleMe current
+```
+
+`/roleMe current` 已不再支持全局当前角色查询。若用户输入该命令，应返回固定提示：
+
+```text
+/roleMe current 已不再支持全局当前角色查询。请在当前会话重新执行 /roleMe <角色名>。
 ```
 
 ### 维护角色
@@ -132,7 +137,7 @@ ROLEME_GRAPH_ARCHIVE=0   禁用 Graph 写入，markdown 正文和索引仍正常
 
 系统会把内容写回当前角色，而不是只返回一段总结文本。
 
-当前角色由 `ROLEME_HOME/.current-role.json` 记录；自然语言归档只能写这个 active role。
+自然语言归档默认写入当前会话已加载的角色；如果当前会话没有加载角色，应先执行 `/roleMe <角色名>`。
 
 默认归档路径：
 

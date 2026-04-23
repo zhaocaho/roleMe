@@ -14,7 +14,6 @@ description: Use when the user wants to initialize, switch, inspect, optimize, e
 - `/roleMe`
 - `/roleMe <角色名>`
 - `/roleMe list`
-- `/roleMe current`
 - `/roleMe optimize [角色名]`
 - `/roleMe export [角色名]`
 - `/roleMe doctor [角色名]`
@@ -45,8 +44,8 @@ description: Use when the user wants to initialize, switch, inspect, optimize, e
 - 判断不够确定时，优先写入 `memory/episodes/` 或项目记忆，不轻易提升到 `memory/USER.md` 与 `memory/MEMORY.md`。
 - 项目级 workflow 写入 `projects/<project-slug>/workflows/index.md` 与 `projects/<project-slug>/workflows/<workflow-slug>.md`；通用 workflow 写入 `brain/workflows/index.md` 与 `brain/workflows/<workflow-slug>.md`；`context.md` 与 `brain/index.md` 只保留到工作流索引的入口，一个 workflow，一个文件，并将稳定规则提升到 `memory/USER.md` 与 `memory/MEMORY.md`。
 - 角色加载生成的冻结快照除常驻文件外，还应优先携带“当前项目 workflow 摘要”和“通用 workflow 摘要”；摘要来自各自的 workflow index，而不是 workflow 正文。
-- 当前角色以 `ROLEME_HOME/.current-role.json` 为准；自然语言归档只能写当前角色。
-- 如果角色目录所在位置不可写，可用 `ROLEME_STATE_HOME` 指定当前角色状态文件的可写目录；未配置时，运行时会退回系统临时目录下的 `roleMe-state/`。
+- 当前角色由当前会话已加载的角色决定，自然语言归档必须写入该会话角色；`.current-role.json` 不再作为当前角色来源。
+- 如果用户输入 `/roleMe current`，应返回固定提示：`/roleMe current 已不再支持全局当前角色查询。请在当前会话重新执行 /roleMe <角色名>。`
 - 如果归档提升了 resident 规则或摘要，应提醒用户重新执行 `/roleMe <角色名>` 才会刷新当前会话底座。
 - `optimize` 与 `doctor` 应优先发现和修复角色包的熵增问题，例如重复记忆、索引失效、resident/on-demand 边界漂移。
 - 只有确定性的文件操作才调用 `tools/role_ops.py`、`tools/memory.py`、`tools/context_router.py`。
