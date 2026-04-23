@@ -22,7 +22,6 @@ from tools.role_ops import (
     build_interview_planner_prompt,
     doctor_role,
     finalize_role_interview,
-    get_current_role_state,
     initialize_role,
     initialize_role_from_interview,
     list_roles,
@@ -147,15 +146,13 @@ def test_load_role_bundle_includes_workflow_summary_snapshot(
     assert "slug: analysis" in bundle.context_snapshot
 
 
-def test_load_role_bundle_persists_current_role_state(tmp_role_home):
+def test_load_role_bundle_does_not_write_current_role_state(tmp_role_home):
     initialize_role("self", skill_version="0.1.0")
 
-    load_role_bundle("self")
-    state = get_current_role_state()
+    bundle = load_role_bundle("self")
 
-    assert state.role_name == "self"
-    assert state.role_path.endswith("/self")
-    assert state.loaded_at
+    assert bundle.role_name == "self"
+    assert not (tmp_role_home / ".current-role.json").exists()
 
 
 def test_load_role_bundle_bootstraps_project_from_git_repo_root(
@@ -236,25 +233,38 @@ def test_load_role_bundle_bootstraps_missing_project_files_without_overwriting_e
     ).read_text(encoding="utf-8")
 
 
-def test_load_query_context_bundle_refreshes_current_role_state(tmp_role_home):
+def test_load_role_bundle_ignores_existing_current_role_state(tmp_role_home):
+    initialize_role("self", skill_version="0.1.0")
+    legacy_state = tmp_role_home / ".current-role.json"
+    legacy_payload = (
+        '{"roleName": "legacy", "rolePath": "/tmp/legacy", '
+        '"loadedAt": "2026-04-15T11:30:00+08:00"}\n'
+    )
+    legacy_state.write_text(legacy_payload, encoding="utf-8")
+
+    bundle = load_role_bundle("self")
+
+    assert bundle.role_name == "self"
+    assert legacy_state.read_text(encoding="utf-8") == legacy_payload
+
+
+def test_load_query_context_bundle_does_not_write_current_role_state(tmp_role_home):
     initialize_role("self", skill_version="0.1.0")
 
-    load_query_context_bundle("self", query="帮我总结成通用的工作方式")
-    state = get_current_role_state()
+    bundle = load_query_context_bundle("self", query="帮我总结成通用的工作方式")
 
-    assert state.role_name == "self"
+    assert bundle.role_name == "self"
+    assert not (tmp_role_home / ".current-role.json").exists()
 
 
-def test_load_role_bundle_falls_back_to_temp_state_home_when_role_home_is_not_writable(
+def test_load_role_bundle_does_not_write_temp_current_state_when_role_home_is_not_writable(
     tmp_role_home,
     tmp_path,
     monkeypatch,
 ):
     initialize_role("self", skill_version="0.1.0")
-    fallback_root = tmp_path / "state-cache"
     original_directory_writable = role_ops._directory_writable
 
-    monkeypatch.setattr(role_ops.tempfile, "gettempdir", lambda: str(fallback_root))
     monkeypatch.setattr(
         role_ops,
         "_directory_writable",
@@ -263,12 +273,7 @@ def test_load_role_bundle_falls_back_to_temp_state_home_when_role_home_is_not_wr
 
     load_role_bundle("self")
 
-    state_path = fallback_root / "roleMe-state" / ".current-role.json"
-    assert state_path.exists()
-
-    state = get_current_role_state()
-    assert state.role_name == "self"
-    assert Path(state.role_path) == tmp_role_home / "self"
+    assert not (tmp_role_home / ".current-role.json").exists()
 
 
 def test_load_role_bundle_skips_project_bootstrap_when_role_home_is_not_writable(
@@ -277,14 +282,12 @@ def test_load_role_bundle_skips_project_bootstrap_when_role_home_is_not_writable
     monkeypatch,
 ):
     role_path = initialize_role("self", skill_version="0.1.0")
-    fallback_root = tmp_path / "state-cache"
     repo_root = tmp_path / "roleMe"
     repo_root.mkdir()
     (repo_root / ".git").mkdir()
     monkeypatch.chdir(repo_root)
 
     original_directory_writable = role_ops._directory_writable
-    monkeypatch.setattr(role_ops.tempfile, "gettempdir", lambda: str(fallback_root))
     monkeypatch.setattr(
         role_ops,
         "_directory_writable",
@@ -298,20 +301,6 @@ def test_load_role_bundle_skips_project_bootstrap_when_role_home_is_not_writable
     assert "projects/roleme/context.md" not in (
         role_path / "projects" / "index.md"
     ).read_text(encoding="utf-8")
-
-
-def test_get_current_role_state_requires_valid_pointer(tmp_role_home):
-    with pytest.raises(FileNotFoundError):
-        get_current_role_state()
-
-    state_path = tmp_role_home / ".current-role.json"
-    state_path.write_text(
-        '{"roleName": "ghost", "rolePath": "/tmp/missing", "loadedAt": "2026-04-15T11:30:00+08:00"}\n',
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ValueError):
-        get_current_role_state()
 
 
 def test_list_roles_returns_sorted_names(tmp_role_home):
@@ -1043,8 +1032,7 @@ def test_upsert_markdown_index_entry_deduplicates_target(tmp_path):
 def test_archive_general_workflow_writes_topic_index_and_memory_promotions(
     tmp_role_home,
 ):
-    initialize_role("self", skill_version="0.1.0")
-    load_role_bundle("self")
+    role_path = initialize_role("self", skill_version="0.1.0")
     plan = parse_workflow_archive_response(
         {
             "kind": "general",
@@ -1065,7 +1053,6 @@ def test_archive_general_workflow_writes_topic_index_and_memory_promotions(
     )
 
     result = archive_general_workflow(plan)
-    role_path = get_current_role_state().role_path
 
     assert "brain/workflows/general-collaboration.md" in result.written_paths
     assert "brain/workflows/index.md" in result.written_paths
@@ -1092,7 +1079,6 @@ def test_archive_project_workflow_writes_project_assets_and_is_rediscoverable(
     tmp_role_home,
 ):
     role_path = initialize_role("self", skill_version="0.1.0")
-    load_role_bundle("self")
     plan = parse_workflow_archive_response(
         {
             "kind": "project",
@@ -1146,8 +1132,7 @@ def test_archive_project_workflow_writes_project_assets_and_is_rediscoverable(
 
 def test_archive_general_workflow_skips_graph_when_disabled(tmp_role_home, monkeypatch):
     monkeypatch.setenv("ROLEME_GRAPH_ARCHIVE", "0")
-    initialize_role("self", skill_version="0.1.0")
-    load_role_bundle("self")
+    role_path = initialize_role("self", skill_version="0.1.0")
     plan = parse_workflow_archive_response(
         {
             "kind": "general",
@@ -1166,7 +1151,6 @@ def test_archive_general_workflow_skips_graph_when_disabled(tmp_role_home, monke
     )
 
     result = archive_general_workflow(plan)
-    role_path = Path(get_current_role_state().role_path)
 
     assert (role_path / "brain" / "workflows" / "general-collaboration.md").exists()
     assert load_graph(role_path).nodes == []
@@ -1178,8 +1162,7 @@ def test_archive_general_workflow_returns_partial_state_when_graph_write_fails(
     tmp_role_home,
     monkeypatch,
 ):
-    initialize_role("self", skill_version="0.1.0")
-    load_role_bundle("self")
+    role_path = initialize_role("self", skill_version="0.1.0")
     monkeypatch.setattr(
         role_ops,
         "_persist_graph",
@@ -1203,7 +1186,6 @@ def test_archive_general_workflow_returns_partial_state_when_graph_write_fails(
     )
 
     result = archive_general_workflow(plan)
-    role_path = Path(get_current_role_state().role_path)
 
     assert (role_path / "brain" / "workflows" / "general-collaboration.md").exists()
     assert result.markdown_written is True
@@ -1230,6 +1212,150 @@ def test_archive_decision_writes_decision_and_evidence(tmp_role_home):
     assert decision.title == "Use graph as background index"
     assert any(node.type == "Evidence" and node.metadata.get("source_path") in result.written_paths for node in graph.nodes)
     assert any(edge.type == "evidenced_by" and edge.from_node == decision.id for edge in graph.edges)
+
+
+def test_archive_general_workflow_requires_role_name(tmp_role_home):
+    initialize_role("self", skill_version="0.1.0")
+    plan = parse_workflow_archive_response(
+        {
+            "kind": "general",
+            "workflow_slug": "general-collaboration",
+            "workflow_title": "通用协作工作流",
+            "workflow_summary": "适合需要先设计再执行的任务",
+            "workflow_applies_to": "当用户需要先对齐工作方式、再进入执行时使用",
+            "workflow_keywords": ["协作", "设计", "执行"],
+            "workflow_doc_markdown": "# 通用协作工作流\n\n先澄清场景，再开始执行。\n",
+            "context_summary_markdown": "",
+            "user_rules": [],
+            "memory_summary": [],
+            "project_memory": [],
+        }
+    )
+
+    with pytest.raises(ValueError, match="role_name"):
+        archive_general_workflow(plan)
+
+
+def test_archive_project_workflow_requires_role_name(tmp_role_home):
+    initialize_role("self", skill_version="0.1.0")
+    plan = parse_workflow_archive_response(
+        {
+            "kind": "project",
+            "project_title": "roleMe",
+            "project_slug": "roleme",
+            "workflow_slug": "requirements",
+            "workflow_title": "roleMe 项目工作流",
+            "workflow_summary": "用于把模糊需求整理成可规划输入",
+            "workflow_applies_to": "当用户想梳理需求、澄清范围、整理用户故事时使用",
+            "workflow_keywords": ["需求", "requirement", "scope"],
+            "workflow_doc_markdown": "# roleMe 项目工作流\n\n先确认角色边界，再设计能力。\n",
+            "context_summary_markdown": "# roleMe\n\n该项目聚焦角色包与工作流沉淀。\n",
+            "user_rules": [],
+            "memory_summary": [],
+            "project_memory": [],
+        }
+    )
+
+    with pytest.raises(ValueError, match="role_name"):
+        archive_project_workflow(plan)
+
+
+def test_archive_general_workflow_rejects_conflicting_role_names(tmp_role_home):
+    initialize_role("self", skill_version="0.1.0")
+    initialize_role("other", skill_version="0.1.0")
+    plan = parse_workflow_archive_response(
+        {
+            "kind": "general",
+            "role_name": "self",
+            "workflow_slug": "general-collaboration",
+            "workflow_title": "通用协作工作流",
+            "workflow_summary": "适合需要先设计再执行的任务",
+            "workflow_applies_to": "当用户需要先对齐工作方式、再进入执行时使用",
+            "workflow_keywords": ["协作", "设计", "执行"],
+            "workflow_doc_markdown": "# 通用协作工作流\n\n先澄清场景，再开始执行。\n",
+            "context_summary_markdown": "",
+            "user_rules": [],
+            "memory_summary": [],
+            "project_memory": [],
+        }
+    )
+
+    with pytest.raises(ValueError, match="conflicts"):
+        archive_general_workflow(plan, role_name="other")
+
+
+def test_archive_project_workflow_rejects_conflicting_role_names(tmp_role_home):
+    initialize_role("self", skill_version="0.1.0")
+    initialize_role("other", skill_version="0.1.0")
+    plan = parse_workflow_archive_response(
+        {
+            "kind": "project",
+            "role_name": "self",
+            "project_title": "roleMe",
+            "project_slug": "roleme",
+            "workflow_slug": "requirements",
+            "workflow_title": "roleMe 项目工作流",
+            "workflow_summary": "用于把模糊需求整理成可规划输入",
+            "workflow_applies_to": "当用户想梳理需求、澄清范围、整理用户故事时使用",
+            "workflow_keywords": ["需求", "requirement", "scope"],
+            "workflow_doc_markdown": "# roleMe 项目工作流\n\n先确认角色边界，再设计能力。\n",
+            "context_summary_markdown": "# roleMe\n\n该项目聚焦角色包与工作流沉淀。\n",
+            "user_rules": [],
+            "memory_summary": [],
+            "project_memory": [],
+        }
+    )
+
+    with pytest.raises(ValueError, match="conflicts"):
+        archive_project_workflow(plan, role_name="other")
+
+
+def test_archive_general_workflow_rejects_unknown_role(tmp_role_home):
+    initialize_role("self", skill_version="0.1.0")
+    plan = parse_workflow_archive_response(
+        {
+            "kind": "general",
+            "role_name": "ghost",
+            "workflow_slug": "general-collaboration",
+            "workflow_title": "通用协作工作流",
+            "workflow_summary": "适合需要先设计再执行的任务",
+            "workflow_applies_to": "当用户需要先对齐工作方式、再进入执行时使用",
+            "workflow_keywords": ["协作", "设计", "执行"],
+            "workflow_doc_markdown": "# 通用协作工作流\n\n先澄清场景，再开始执行。\n",
+            "context_summary_markdown": "",
+            "user_rules": [],
+            "memory_summary": [],
+            "project_memory": [],
+        }
+    )
+
+    with pytest.raises(FileNotFoundError, match="Role does not exist"):
+        archive_general_workflow(plan)
+
+
+def test_archive_project_workflow_rejects_unknown_role(tmp_role_home):
+    initialize_role("self", skill_version="0.1.0")
+    plan = parse_workflow_archive_response(
+        {
+            "kind": "project",
+            "role_name": "ghost",
+            "project_title": "roleMe",
+            "project_slug": "roleme",
+            "workflow_slug": "requirements",
+            "workflow_title": "roleMe 项目工作流",
+            "workflow_summary": "用于把模糊需求整理成可规划输入",
+            "workflow_applies_to": "当用户想梳理需求、澄清范围、整理用户故事时使用",
+            "workflow_keywords": ["需求", "requirement", "scope"],
+            "workflow_doc_markdown": "# roleMe 项目工作流\n\n先确认角色边界，再设计能力。\n",
+            "context_summary_markdown": "# roleMe\n\n该项目聚焦角色包与工作流沉淀。\n",
+            "user_rules": [],
+            "memory_summary": [],
+            "project_memory": [],
+        }
+    )
+
+    with pytest.raises(FileNotFoundError, match="Role does not exist"):
+        archive_project_workflow(plan)
 
 
 def test_archive_decision_returns_partial_state_when_graph_write_fails(

@@ -203,7 +203,8 @@ def test_build_skill_includes_workflow_archive_guidance(tmp_path):
     assert "workflow.md" not in usage_md
     assert "general-workflow.md" not in skill_md
     assert "general-workflow.md" not in usage_md
-    assert ".current-role.json" in usage_md
+    assert "不再作为当前角色来源" in usage_md
+    assert "当前会话重新执行 /roleMe <角色名>" in usage_md
     assert "重新执行 `/roleMe <角色名>`" in usage_md
 
 
@@ -225,7 +226,7 @@ def test_build_skill_includes_role_storage_guidance(tmp_path):
 
     assert "不要去 `~/.agents/skills/roleme/roles/`" in skill_md
     assert "角色包不保存在 skill 安装目录里" in usage_md
-    assert "ROLEME_STATE_HOME" in usage_md
+    assert "当前会话最近一次成功加载的角色" in usage_md
 
 
 def test_build_skill_includes_natural_language_archive_guidance(tmp_path):
